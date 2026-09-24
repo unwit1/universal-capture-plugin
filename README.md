@@ -161,3 +161,12 @@ Tampermonkey menu commands can:
 - clear the local Browser Journal buffer.
 
 The combined export is intentionally run from Discord Web because Discord's local IndexedDB belongs to the Discord origin. The Browser Journal itself can be exported from any website.
+
+
+## Per-thread / per-post save buttons
+
+On SpaceBattles and Questionable Questing, Agent OS no longer uses one floating save button for the whole forum page. Instead, each rendered thread row gets its own `+ Agent OS` button on the right side of that thread entry. Individual thread pages also get an entity-scoped button near the thread title.
+
+On Reddit, the same rule applies: the page-wide floating button is suppressed, and each rendered Reddit post/card gets its own `+ Agent OS` button. Individual post pages use the same post-scoped control.
+
+This makes captures unambiguous: clicking a button always saves the specific thread/post attached to that button rather than the surrounding listing/feed page.
