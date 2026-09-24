@@ -72,3 +72,27 @@ Tampermonkey menu commands are available to:
 - clear the local Discord index.
 
 The local Discord index persists across page reloads on that browser, but clearing Discord site data/browser storage can remove it.
+
+
+## Discord archive and compaction
+
+Discord indexing now uses an incremental MutationObserver path: after the initial/route scan, it processes only newly added rendered message/search-result nodes instead of rescanning the complete rendered message list after every DOM mutation.
+
+The local Discord database has two tiers:
+
+- `messages`: active full records containing message text and metadata.
+- `seen`: compact archive markers containing only the message identity, channel identity, timestamp, and archive time.
+
+The built-in Discord Index browser has date-range controls. The intended workflow is:
+
+1. Choose a From and/or Through date.
+2. Click **Export date range**.
+3. Verify the downloaded JSON archive exists.
+4. Click **Compact exported range** using the same dates.
+5. Full message bodies in that range are deleted from the active IndexedDB store and replaced by tiny `seen` markers.
+
+If Discord later renders one of those archived messages again, the userscript checks the marker and does not store the full message again.
+
+This makes the browser index useful as a rolling cache instead of requiring it to retain every historical message body forever.
+
+Do not compact a range until its JSON export has been verified. The public userscript cannot reliably append silently to a permanent filesystem archive because browser userscripts are sandboxed from arbitrary filesystem writes. The long-term fully automatic design is to synchronize indexed records to the Agent OS local service, wait for a durable acknowledgement, and then compact acknowledged records automatically.
