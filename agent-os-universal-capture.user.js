@@ -3244,9 +3244,10 @@
         if (!/\/(?:gp\/cart|cart)(?:\/|$|\?)/i.test(location.pathname)) return;
         if (document.getElementById("agent-os-amazon-cart-import")) return;
 
-        var host = document.querySelector(
-            "#sc-active-cart h1, .sc-cart-header, #sc-active-cart, #activeCartViewForm"
-        );
+        var heading = document.querySelector("#sc-active-cart h1, .sc-cart-header h1, #sc-active-cart .sc-cart-header");
+        var host = heading && heading.parentElement
+            ? heading.parentElement
+            : document.querySelector("#sc-active-cart, #activeCartViewForm");
         if (!host) return;
 
         var button = amazonNativeButton("Import Cart to Agent OS");
@@ -3254,12 +3255,19 @@
         button.title = "Import the currently rendered Amazon cart into Agent OS";
         button.style.float = "right";
         button.style.fontWeight = "600";
+        button.style.marginTop = "0";
         button.addEventListener("click", function (event) {
             event.preventDefault();
             event.stopPropagation();
             importAmazonCart(button);
         });
-        host.insertBefore(button, host.firstChild);
+        if (heading && heading.nextSibling) {
+            host.insertBefore(button, heading.nextSibling);
+        } else if (heading) {
+            host.appendChild(button);
+        } else {
+            host.insertBefore(button, host.firstChild);
+        }
     }
 
     function addAmazonControls() {
