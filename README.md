@@ -129,3 +129,35 @@ Permanent rows keep only the data needed for the message library:
 The direct Discord message URL can always be reconstructed from guild/channel/message IDs.
 
 After a successfully verified export, local archive markers are now reduced to essentially `{key}` only. Existing verbose markers are automatically rewritten into the smaller representation when the local IndexedDB schema upgrades to v3.
+
+
+## Browser Interaction Journal
+
+The userscript now includes a local-first Browser Journal for building future Agent OS context from ordinary browsing activity.
+
+It records compact events for:
+
+- page/navigation visits using a sanitized URL (origin + path; arbitrary query strings and fragments are not persisted);
+- recognized search-query parameters such as `q`, `query`, and `search`;
+- active page-session duration;
+- finalized text entered into eligible text/search/email/URL/telephone fields, textareas, and contenteditable areas;
+- copied page text;
+- clicked links and their visible labels.
+
+It does **not** record keydown/keyup events or save a character-by-character keystroke stream. Text is persisted only on blur, change, submit, route change, or page hide.
+
+Sensitive-data protections exclude password and hidden inputs, payment-card/autocomplete fields, one-time-code/WebAuthn fields, fields whose labels indicate passwords, PINs, OTP/MFA/security codes, card/CVV/routing/account/SSN/API-key/token/private-key/secret data, and values that look like common private keys, GitHub/OpenAI/AWS/Google credentials, or JWTs. Text capture is also disabled on obvious login/auth/payment/security routes.
+
+Browser Journal storage uses Tampermonkey's script-scoped storage in small per-tab chunks, so the journal is shared across websites without being tied to each website's IndexedDB origin. The floating `Journal ●` indicator is visible while journaling is active.
+
+Tampermonkey menu commands can:
+
+- turn Browser Journal on/off;
+- include or exclude the current domain;
+- export a date range as compact gzip-compressed JSONL;
+- compact an already-exported Browser Journal range;
+- export a combined Discord + Browser Journal activity archive while Discord Web is open;
+- compact a verified combined range;
+- clear the local Browser Journal buffer.
+
+The combined export is intentionally run from Discord Web because Discord's local IndexedDB belongs to the Discord origin. The Browser Journal itself can be exported from any website.
