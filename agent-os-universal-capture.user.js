@@ -348,6 +348,7 @@
     }
 
     function journalSearchQuery(urlText) {
+        if (journalSensitivePage()) return "";
         try {
             var u = new URL(urlText, location.href);
             var keys = ["q", "query", "search", "search_query", "keyword", "keywords", "k", "term"];
