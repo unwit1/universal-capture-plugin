@@ -94,3 +94,10 @@ The userscript does not delete or compact staging records merely because a reque
 Manual page/thread/post captures can also use the local bridge as a fallback destination when no separate capture endpoint has been configured.
 
 The public repository contains bridge protocol code only. It does not contain the local bridge token, browser event database, Discord records, Browser Journal records, or generated archive files.
+
+
+## Amazon cart capture
+
+Amazon cart import records only product/cart information rendered in the active cart view. It is not a checkout automation feature and does not attempt to read payment-card fields, saved payment methods, account passwords, or checkout credentials.
+
+A cart snapshot can contain shopping-sensitive information such as product names, quantities, observed prices, sellers, variations, and subtotal. These records are treated as private runtime data and are sent only through the configured Agent OS capture/bridge path or retained in the local queue when no endpoint is available.
