@@ -43,3 +43,12 @@ Tampermonkey may fetch the raw GitHub userscript URL to check for updates.
 `scripts/privacy_audit.py` is run by GitHub Actions on pushes and pull requests. It blocks a set of high-risk literal patterns such as private-key material, common token prefixes, credential-bearing URLs, obvious Windows user-profile paths, and common secret assignments.
 
 Automated pattern scanning is defense in depth, not proof that a file contains no sensitive information. Public changes should still be reviewed before intentional publication.
+
+
+## Discord Web local index
+
+The Discord passive-indexing feature observes only message elements that Discord Web has rendered in the current browser session. Captured message records are stored locally in the browser's IndexedDB under the Discord origin.
+
+The public repository does not contain those records. The userscript does not embed a Discord token and does not use Discord's private message APIs. Exporting the local index creates a JSON download only when the user explicitly invokes an export command.
+
+Because message content can itself contain sensitive information, exported Discord index files should be treated as private data and must not be committed to this public repository.
