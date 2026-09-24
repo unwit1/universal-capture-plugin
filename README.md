@@ -223,3 +223,18 @@ Story captures use stable site-specific identities:
 - Fiction.live: story ID from `/stories/<slug>/<story-id>/...`
 
 The capture includes the canonical story URL plus best-effort story metadata available in the rendered page, such as title, author, summary/synopsis, fandoms, tags, chapter identity, and visible stats text. This lets Agent OS deduplicate the same story across chapters and list/detail views.
+
+
+## Amazon per-item capture and cart import
+
+Amazon now uses entity-scoped controls instead of the page-wide floating save button.
+
+The userscript adds a `+ Agent OS` button to rendered Amazon product entries such as search results, supported recommendation/product cards, active cart rows, and the individual product page.
+
+Per-item captures use the ASIN as the stable product identity and preserve best-effort rendered metadata including title, observed price, image, seller, availability, rating, Prime indicator, quantity when visible, selected variation text, marketplace, and source view.
+
+On the Amazon cart page, an `Import Cart to Agent OS` control captures the currently rendered active cart as one structured `shopping_cart` snapshot. The snapshot contains the observed subtotal and an item array with each detected product's ASIN, title, quantity, price, seller, availability, variations, Prime state, image, and canonical product URL.
+
+The cart snapshot uses a stable marketplace-specific source ID, so importing the cart again updates/deduplicates the current cart record through the Agent OS bridge rather than blindly multiplying identical cart captures. Individual cart products can still be saved separately with their own per-item buttons.
+
+A Tampermonkey menu command, `Agent OS: Import Amazon cart`, provides the same cart import action when the cart page is open.
