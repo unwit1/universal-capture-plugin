@@ -2493,7 +2493,19 @@
 
     function sendCapture(capture, button) {
         var settings = loadSettings();
-        if (!settings.endpoint) {
+        var endpoint = settings.endpoint || "";
+        var token = settings.token || "";
+
+        // Once the local bridge is configured, it is the default durable
+        // destination for manual captures unless the user explicitly set a
+        // different capture endpoint.
+        if (!endpoint && settings.bridgeEnabled && settings.bridgeToken) {
+            endpoint = settings.bridgeCaptureEndpoint ||
+                String(settings.bridgeEndpoint || "").replace(/\/batch(?:\?.*)?$/, "/capture");
+            token = settings.bridgeToken;
+        }
+
+        if (!endpoint) {
             var count = queueCapture(capture, "endpoint-not-configured");
             setButtonState(button, "✓ Queued (" + count + ")", "ok");
             window.setTimeout(function () { setButtonState(button, "+ Agent OS", ""); }, 1600);
@@ -2502,11 +2514,11 @@
 
         setButtonState(button, "Saving…", "busy");
         var headers = { "Content-Type": "application/json" };
-        if (settings.token) headers["X-Agent-OS-Token"] = settings.token;
+        if (token) headers["X-Agent-OS-Token"] = token;
 
         GM_xmlhttpRequest({
             method: "POST",
-            url: settings.endpoint,
+            url: endpoint,
             headers: headers,
             data: JSON.stringify(capture),
             timeout: 15000,
@@ -3056,6 +3068,10 @@
         GM_registerMenuCommand("Agent OS: Retry queued captures", retryQueue);
         GM_registerMenuCommand("Agent OS: Copy queued captures as JSON", exportQueue);
         GM_registerMenuCommand("Agent OS: Clear queued captures", clearQueue);
+        GM_registerMenuCommand("Agent OS: Configure local bridge", configureLocalBridge);
+        GM_registerMenuCommand("Agent OS: Local bridge ON/OFF", toggleLocalBridge);
+        GM_registerMenuCommand("Agent OS: Sync local bridge now", function () { bridgeSyncNow(true); });
+        GM_registerMenuCommand("Agent OS: Local bridge status", showBridgeStatus);
         GM_registerMenuCommand("Agent OS: Browser Journal ON/OFF", toggleBrowserJournal);
         GM_registerMenuCommand("Agent OS: Browser Journal include/exclude this domain", toggleJournalCurrentDomainExclusion);
         GM_registerMenuCommand("Agent OS: Browser Journal export range", function () { exportBrowserJournalPrompt(); });
@@ -3075,6 +3091,7 @@
     registerMenus();
     addFloatingButton();
     initializeBrowserJournal();
+    initializeBridgeSync();
     addNexusCardButtons();
     addXenforoThreadButtons();
     addRedditPostButtons();
@@ -3127,6 +3144,8 @@
         queued: (GM_getValue(QUEUE_KEY, []) || []).length,
         discord_passive_indexing: isDiscordWeb() ? loadSettings().discordPassiveIndexing : undefined,
         browser_journal: loadSettings().browserJournalEnabled,
-        browser_journal_domain_excluded: journalDomainExcluded(hostname())
+        browser_journal_domain_excluded: journalDomainExcluded(hostname()),
+        bridge_enabled: loadSettings().bridgeEnabled,
+        bridge_configured: bridgeConfigured()
     });
 })();
