@@ -96,3 +96,36 @@ If Discord later renders one of those archived messages again, the userscript ch
 This makes the browser index useful as a rolling cache instead of requiring it to retain every historical message body forever.
 
 Do not compact a range until its JSON export has been verified. The public userscript cannot reliably append silently to a permanent filesystem archive because browser userscripts are sandboxed from arbitrary filesystem writes. The long-term fully automatic design is to synchronize indexed records to the Agent OS local service, wait for a durable acknowledgement, and then compact acknowledged records automatically.
+
+
+## Compact Discord archive format
+
+Discord exports now use compact newline-delimited JSON and gzip when the browser supports `CompressionStream`.
+
+Normal output:
+
+    agent-os-discord-archive-...jsonl.gz
+
+Fallback on browsers without gzip support:
+
+    agent-os-discord-archive-...jsonl
+
+The first JSONL line is a compact archive header containing the schema version, export metadata, field order, and dictionaries for guilds, channels, and authors. Every following line is one compact message row stored as an array rather than a verbose JSON object.
+
+This avoids repeating property names, server names, channel names, author names, generated Discord message URLs, device labels, page titles, and other reconstructable/debug-only fields on every message.
+
+Permanent rows keep only the data needed for the message library:
+
+- Discord message ID
+- channel ID
+- author dictionary index
+- timestamp as integer Unix seconds
+- message text
+- reply message ID when present
+- non-redundant URLs
+- attachment URL/label pairs
+- whether the record came from rendered search results
+
+The direct Discord message URL can always be reconstructed from guild/channel/message IDs.
+
+After a successfully verified export, local archive markers are now reduced to essentially `{key}` only. Existing verbose markers are automatically rewritten into the smaller representation when the local IndexedDB schema upgrades to v3.
