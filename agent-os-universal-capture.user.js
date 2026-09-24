@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.9.0
+// @version      3.9.1
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -26,7 +26,7 @@
 (function () {
     "use strict";
 
-    var VERSION = "3.9.0";
+    var VERSION = "3.9.1";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var MAX_QUEUE = 500;
@@ -2157,9 +2157,9 @@
     function isXenforoCaptureSite() {
         var host = hostname();
         return host === "spacebattles.com" ||
-            host === "www.spacebattles.com" ||
+            host.endsWith(".spacebattles.com") ||
             host === "questionablequesting.com" ||
-            host === "www.questionablequesting.com";
+            host.endsWith(".questionablequesting.com");
     }
 
     function isXenforoIndividualThread() {
@@ -2206,8 +2206,8 @@
         try {
             var u = new URL(urlText, location.href);
             var host = String(u.hostname || "").toLowerCase();
-            var isSB = host === "spacebattles.com" || host === "www.spacebattles.com";
-            var isQQ = host === "questionablequesting.com" || host === "www.questionablequesting.com";
+            var isSB = host === "spacebattles.com" || host.endsWith(".spacebattles.com");
+            var isQQ = host === "questionablequesting.com" || host.endsWith(".questionablequesting.com");
             if (!isSB && !isQQ) return null;
             var match = u.pathname.match(/\/threads\/[^/]*\.(\d+)(?:\/|$)/i);
             if (!match) return null;
