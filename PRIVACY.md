@@ -61,3 +61,10 @@ Date-range archive exports contain the full selected Discord records and are the
 After a user verifies an archive export, the userscript can compact that date range locally. Compaction removes full message bodies from the active IndexedDB `messages` store and retains only minimal `seen` markers needed to prevent the same rendered Discord message from being stored again. Clearing archive markers allows those messages to be indexed again if rendered later.
 
 The userscript does not silently write a permanent archive to arbitrary local filesystem paths. Fully automatic durable archival should use an authenticated Agent OS local ingestion endpoint with acknowledgement before local compaction.
+
+
+## Compact export contents
+
+Compressed Discord archives still contain private message content even though they are storage-efficient. Compression and dictionary encoding reduce file size; they do not anonymize or encrypt the archive.
+
+The compact export deliberately omits browser/device metadata and other reconstructable fields that are not required for the durable message library. Archive-marker compaction retains only the canonical message key needed to prevent re-indexing.
