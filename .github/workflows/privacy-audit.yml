@@ -13,5 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Check userscript JavaScript syntax
+        run: node --check agent-os-universal-capture.user.js
       - name: Scan public distribution files
         run: python scripts/privacy_audit.py
