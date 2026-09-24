@@ -3141,6 +3141,7 @@
             var host = card.querySelector(".stitle") && card.querySelector(".stitle").parentElement;
             host = host || card;
             var button = storyNativeButton("fanfiction");
+            button.style.float = "right";
             button.title = "Save this FanFiction story to Agent OS";
             button.addEventListener("click", function (event) {
                 event.preventDefault();
@@ -3183,6 +3184,7 @@
 
             var host = card.querySelector("h4.heading") || card;
             var button = storyNativeButton("ao3");
+            button.style.float = "right";
             button.title = "Save this AO3 work to Agent OS";
             button.addEventListener("click", function (event) {
                 event.preventDefault();
@@ -3234,6 +3236,7 @@
 
             var host = card.querySelector("h1, h2, h3, h4, [class*='title']") || card;
             var button = storyNativeButton("fiction-live");
+            button.style.float = "right";
             button.title = "Save this Fiction.live story to Agent OS";
             button.addEventListener("click", function (event) {
                 event.preventDefault();
