@@ -68,3 +68,18 @@ The userscript does not silently write a permanent archive to arbitrary local fi
 Compressed Discord archives still contain private message content even though they are storage-efficient. Compression and dictionary encoding reduce file size; they do not anonymize or encrypt the archive.
 
 The compact export deliberately omits browser/device metadata and other reconstructable fields that are not required for the durable message library. Archive-marker compaction retains only the canonical message key needed to prevent re-indexing.
+
+
+## Browser Interaction Journal
+
+The Browser Journal is an opt-in-at-the-product-level local capture feature enabled in this distribution for the user's Agent OS workflow, with a persistent visible status indicator and Tampermonkey controls to disable journaling or exclude the current domain.
+
+The journal does not record raw keyboard events or character-by-character keystrokes. It records finalized text values only at lifecycle boundaries such as blur, change, submit, route change, or page hide.
+
+The implementation blocks password/hidden inputs; payment-card, one-time-code and WebAuthn autocomplete categories; field contexts indicating passwords, PINs, OTP/MFA/security codes, card/CVV/routing/account/SSN/API-key/token/private-key/secret data; and text matching several common credential/private-key/JWT forms. It also suppresses text capture on obvious login/auth/payment/security paths.
+
+Stored browsing URLs are sanitized to origin + pathname. Arbitrary query strings and fragments are discarded. Recognized search-query values may be retained as explicit intent/context data unless they match secret filters.
+
+Browser Journal data is private runtime data held in Tampermonkey storage and is never committed to this public repository. Combined Discord + Browser Journal archives contain private conversation/browsing/input content even when compressed; compression does not encrypt or anonymize them.
+
+Users should use the per-domain exclusion control for sites whose content they do not want included. Future central Agent OS ingestion should acknowledge durable receipt before local journal compaction.
