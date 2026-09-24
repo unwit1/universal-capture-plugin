@@ -170,3 +170,35 @@ On SpaceBattles and Questionable Questing, Agent OS no longer uses one floating 
 On Reddit, the same rule applies: the page-wide floating button is suppressed, and each rendered Reddit post/card gets its own `+ Agent OS` button. Individual post pages use the same post-scoped control.
 
 This makes captures unambiguous: clicking a button always saves the specific thread/post attached to that button rather than the surrounding listing/feed page.
+
+
+## Local Agent OS bridge
+
+The userscript can continuously drain its browser-side staging data into a local Personal Agent OS bridge.
+
+Default batch endpoint:
+
+    http://127.0.0.1:8766/api/v1/browser/batch
+
+Default manual-capture endpoint:
+
+    http://127.0.0.1:8766/api/v1/browser/capture
+
+The bridge must be running locally and configured with its local token. The token is stored only in Tampermonkey script storage.
+
+Use the Tampermonkey menu commands:
+
+- `Agent OS: Configure local bridge`
+- `Agent OS: Local bridge ON/OFF`
+- `Agent OS: Sync local bridge now`
+- `Agent OS: Local bridge status`
+
+When configured, the userscript sends small batches automatically. Browser Journal events are removed from Tampermonkey storage only after the bridge responds with a durable acknowledgement. Discord messages are moved from the full IndexedDB message store into tiny seen markers only after the same durable acknowledgement.
+
+This creates a bounded browser-side staging model:
+
+    browser staging -> loopback bridge -> durable SQLite ACK -> local compaction
+
+If the bridge is unavailable, times out, rejects the token, or fails to return a durable acknowledgement, the userscript keeps the local data and retries later.
+
+Discord revisions are protected from an ACK race: before compacting an acknowledged Discord record, the userscript compares the current rendered-record fingerprint with the copy that was sent. If the message changed while the request was in flight, it stays in IndexedDB for a later sync.
