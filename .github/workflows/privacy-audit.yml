@@ -1,0 +1,17 @@
+name: Privacy audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Scan public distribution files
+        run: python scripts/privacy_audit.py
