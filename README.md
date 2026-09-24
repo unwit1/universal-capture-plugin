@@ -202,3 +202,24 @@ This creates a bounded browser-side staging model:
 If the bridge is unavailable, times out, rejects the token, or fails to return a durable acknowledgement, the userscript keeps the local data and retries later.
 
 Discord revisions are protected from an ACK race: before compacting an acknowledged Discord record, the userscript compares the current rendered-record fingerprint with the copy that was sent. If the message changed while the request was in flight, it stays in IndexedDB for a later sync.
+
+
+## Fanfiction / web-fiction story capture
+
+The userscript now adds per-story `+ Agent OS` controls on:
+
+- FanFiction.net
+- Archive of Our Own (AO3)
+- Fiction.live
+
+The generic page-wide floating button is suppressed on these sites.
+
+On listing/search/browse pages, each rendered story/work entry gets its own button aligned with that specific entry. On an individual story/work page, the button is placed inline near the title.
+
+Story captures use stable site-specific identities:
+
+- FanFiction.net: story ID from `/s/<story-id>/...`
+- AO3: work ID from `/works/<work-id>/...`
+- Fiction.live: story ID from `/stories/<slug>/<story-id>/...`
+
+The capture includes the canonical story URL plus best-effort story metadata available in the rendered page, such as title, author, summary/synopsis, fandoms, tags, chapter identity, and visible stats text. This lets Agent OS deduplicate the same story across chapters and list/detail views.
