@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.9.2
+// @version      3.10.0
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -26,7 +26,7 @@
 (function () {
     "use strict";
 
-    var VERSION = "3.9.2";
+    var VERSION = "3.10.0";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var MAX_QUEUE = 500;
@@ -39,7 +39,13 @@
         showFloatingButton: true,
         discordPassiveIndexing: true,
         browserJournalEnabled: true,
-        browserJournalExcludedDomains: []
+        browserJournalExcludedDomains: [],
+        bridgeEnabled: true,
+        bridgeEndpoint: "http://127.0.0.1:8766/api/v1/browser/batch",
+        bridgeCaptureEndpoint: "http://127.0.0.1:8766/api/v1/browser/capture",
+        bridgeToken: "",
+        bridgeAutoCompact: true,
+        bridgeSyncSeconds: 30
     };
 
     function loadSettings() {
@@ -311,6 +317,7 @@
     var journalSessionId = Date.now().toString(36) + "-" +
         Math.random().toString(36).slice(2, 10);
     var journalChunkSeq = 0;
+    var journalEventSeq = 0;
     var journalLastSavedValues = new WeakMap();
     var journalCurrentRoute = location.href;
     var journalCurrentPage = null;
@@ -392,6 +399,10 @@
 
     function journalAppendRow(row) {
         if (!journalEnabled()) return false;
+        if (!row[7]) {
+            journalEventSeq += 1;
+            row[7] = "journal:" + journalSessionId + ":" + journalEventSeq + ":" + String(row[0] || Date.now());
+        }
         var key = journalChunkKey();
         var chunk = GM_getValue(key, []);
         if (!Array.isArray(chunk)) chunk = [];
@@ -402,6 +413,7 @@
         }
         chunk.push(row);
         GM_setValue(key, chunk);
+        bridgeScheduleSoon(1500);
         return true;
     }
 
