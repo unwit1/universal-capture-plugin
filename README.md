@@ -21,7 +21,7 @@ The script uses the same URL for `@updateURL` and `@downloadURL`, so after the o
 - SpaceBattles threads
 - Questionable Questing threads
 - Generic fallback for ordinary HTTP/HTTPS pages
-- Discord Web passive message indexing for messages that Discord renders while you browse or manually scroll
+- Discord Web passive message indexing for messages that Discord renders while you browse, manually scroll, or view in Discord search results
 
 ## Privacy boundary
 
@@ -47,9 +47,9 @@ See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 ## Discord passive indexing
 
-On `discord.com/channels/...`, passive indexing is enabled by default.
+On `discord.com/channels/...`, passive indexing defaults to **ON** the first time Discord is detected. If the user explicitly turns it off, that preference is preserved.
 
-The userscript watches Discord's rendered message DOM and writes newly observed messages into a dedicated browser IndexedDB database named `agent_os_discord_index_v1`. It deduplicates by guild/channel/message ID and updates a record if the rendered message content changes.
+The userscript watches Discord's rendered message DOM and writes newly observed messages into a dedicated browser IndexedDB database named `agent_os_discord_index_v1`. It deduplicates by guild/channel/message ID and updates a record if the rendered message content changes. Rendered search-result messages are captured too, including results from channels other than the channel currently open when Discord provides a message permalink.
 
 It does **not**:
 
@@ -59,11 +59,14 @@ It does **not**:
 - call Discord's private APIs;
 - crawl channels that are not currently rendered in your browser.
 
-A small `Discord Index ● <count>` indicator appears below the normal Agent OS button while Discord Web is open. Click it for local index statistics.
+A small `Discord Index ● <count>` indicator appears below the normal Agent OS button while Discord Web is open. Clicking it opens the built-in **local index browser**, where you can filter recent indexed messages, see whether a record came from a channel or search results, open the original Discord message, and export the current channel or complete local index as JSON.
+
+The local archive is stored in browser-managed IndexedDB, not in a normal filesystem directory that a userscript can open. The index browser is the direct viewer for that storage. JSON exports are written through the browser's normal download flow.
 
 Tampermonkey menu commands are available to:
 
 - turn Discord passive indexing on/off;
+- open the local Discord index browser;
 - export the current channel's indexed messages as JSON;
 - export the full local Discord index as JSON;
 - clear the local Discord index.
