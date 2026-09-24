@@ -47,8 +47,8 @@ Automated pattern scanning is defense in depth, not proof that a file contains n
 
 ## Discord Web local index
 
-The Discord passive-indexing feature observes only message elements that Discord Web has rendered in the current browser session. Captured message records are stored locally in the browser's IndexedDB under the Discord origin.
+The Discord passive-indexing feature observes only message elements that Discord Web has rendered in the current browser session, including rendered Discord search results. Captured message records are stored locally in the browser's IndexedDB under the Discord origin. The feature defaults to on when Discord is first detected, but an explicit user choice to turn it off is persisted.
 
-The public repository does not contain those records. The userscript does not embed a Discord token and does not use Discord's private message APIs. Exporting the local index creates a JSON download only when the user explicitly invokes an export command.
+The public repository does not contain those records. The userscript does not embed a Discord token and does not use Discord's private message APIs. Clicking the Discord Index control opens an in-page browser for local IndexedDB records; it does not expose or open a browser-profile filesystem directory. Exporting the local index creates a JSON download only when the user explicitly invokes an export command.
 
 Because message content can itself contain sensitive information, exported Discord index files should be treated as private data and must not be committed to this public repository.
