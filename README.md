@@ -21,6 +21,7 @@ The script uses the same URL for `@updateURL` and `@downloadURL`, so after the o
 - SpaceBattles threads
 - Questionable Questing threads
 - Generic fallback for ordinary HTTP/HTTPS pages
+- Discord Web passive message indexing for messages that Discord renders while you browse or manually scroll
 
 ## Privacy boundary
 
@@ -42,3 +43,29 @@ The userscript stores its configured endpoint, device token, device label, and o
 By default, if no endpoint is configured, captures are queued locally. The script has no analytics or telemetry service of its own.
 
 See [PRIVACY.md](PRIVACY.md) for the audit model.
+
+
+## Discord passive indexing
+
+On `discord.com/channels/...`, passive indexing is enabled by default.
+
+The userscript watches Discord's rendered message DOM and writes newly observed messages into a dedicated browser IndexedDB database named `agent_os_discord_index_v1`. It deduplicates by guild/channel/message ID and updates a record if the rendered message content changes.
+
+It does **not**:
+
+- auto-scroll a channel;
+- switch channels for you;
+- extract the Discord authentication token;
+- call Discord's private APIs;
+- crawl channels that are not currently rendered in your browser.
+
+A small `Discord Index ● <count>` indicator appears below the normal Agent OS button while Discord Web is open. Click it for local index statistics.
+
+Tampermonkey menu commands are available to:
+
+- turn Discord passive indexing on/off;
+- export the current channel's indexed messages as JSON;
+- export the full local Discord index as JSON;
+- clear the local Discord index.
+
+The local Discord index persists across page reloads on that browser, but clearing Discord site data/browser storage can remove it.
