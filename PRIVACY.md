@@ -52,3 +52,12 @@ The Discord passive-indexing feature observes only message elements that Discord
 The public repository does not contain those records. The userscript does not embed a Discord token and does not use Discord's private message APIs. Clicking the Discord Index control opens an in-page browser for local IndexedDB records; it does not expose or open a browser-profile filesystem directory. Exporting the local index creates a JSON download only when the user explicitly invokes an export command.
 
 Because message content can itself contain sensitive information, exported Discord index files should be treated as private data and must not be committed to this public repository.
+
+
+## Discord archival compaction
+
+Date-range archive exports contain the full selected Discord records and are therefore private user data. They are downloaded only after an explicit export action and must not be committed to this public repository.
+
+After a user verifies an archive export, the userscript can compact that date range locally. Compaction removes full message bodies from the active IndexedDB `messages` store and retains only minimal `seen` markers needed to prevent the same rendered Discord message from being stored again. Clearing archive markers allows those messages to be indexed again if rendered later.
+
+The userscript does not silently write a permanent archive to arbitrary local filesystem paths. Fully automatic durable archival should use an authenticated Agent OS local ingestion endpoint with acknowledgement before local compaction.
