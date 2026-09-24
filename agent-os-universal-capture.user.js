@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.7.2
+// @version      3.8.0
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -26,7 +26,7 @@
 (function () {
     "use strict";
 
-    var VERSION = "3.7.2";
+    var VERSION = "3.8.0";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var MAX_QUEUE = 500;
@@ -2143,9 +2143,48 @@
         button.style.zIndex = "2147483646";
     }
 
+    function isRedditSite() {
+        return hostname() === "reddit.com" ||
+            hostname() === "www.reddit.com" ||
+            hostname() === "old.reddit.com" ||
+            hostname() === "new.reddit.com";
+    }
+
+    function isRedditIndividualPost() {
+        return isRedditSite() && /\/comments\/[^/]+/i.test(location.pathname);
+    }
+
+    function isXenforoCaptureSite() {
+        var host = hostname();
+        return host === "spacebattles.com" ||
+            host === "www.spacebattles.com" ||
+            host === "questionablequesting.com" ||
+            host === "www.questionablequesting.com";
+    }
+
+    function isXenforoIndividualThread() {
+        return isXenforoCaptureSite() &&
+            /\/threads\/[^/]*\.\d+(?:\/|$)/i.test(location.pathname);
+    }
+
+    function shouldShowFloatingButton() {
+        if (isRedditSite()) return isRedditIndividualPost();
+        if (isXenforoCaptureSite()) return isXenforoIndividualThread();
+        return true;
+    }
+
     function addFloatingButton() {
-        if (!loadSettings().showFloatingButton) return;
-        if (document.getElementById("agent-os-universal-save")) return;
+        var existing = document.getElementById("agent-os-universal-save");
+
+        // Reddit and the supported XenForo forums are intentionally
+        // entity-scoped: only expose the save action on an individual
+        // Reddit post or forum thread, never feeds/search/forum indexes.
+        if (!loadSettings().showFloatingButton || !shouldShowFloatingButton()) {
+            if (existing) existing.remove();
+            return;
+        }
+
+        if (existing) return;
         if (!document.body) return;
 
         var button = document.createElement("button");
