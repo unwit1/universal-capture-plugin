@@ -83,3 +83,14 @@ Stored browsing URLs are sanitized to origin + pathname. Arbitrary query strings
 Browser Journal data is private runtime data held in Tampermonkey storage and is never committed to this public repository. Combined Discord + Browser Journal archives contain private conversation/browsing/input content even when compressed; compression does not encrypt or anonymize them.
 
 Users should use the per-domain exclusion control for sites whose content they do not want included. Future central Agent OS ingestion should acknowledge durable receipt before local journal compaction.
+
+
+## Local bridge transport
+
+When explicitly configured, the userscript sends Browser Journal and Discord staging records only to the configured bridge endpoint. The intended/default endpoint is loopback (`127.0.0.1`) and the bridge token remains in Tampermonkey storage.
+
+The userscript does not delete or compact staging records merely because a request was sent. It requires a successful response that explicitly reports `durable: true` and lists acknowledged event IDs. Failed or ambiguous requests leave local records intact.
+
+Manual page/thread/post captures can also use the local bridge as a fallback destination when no separate capture endpoint has been configured.
+
+The public repository contains bridge protocol code only. It does not contain the local bridge token, browser event database, Discord records, Browser Journal records, or generated archive files.
