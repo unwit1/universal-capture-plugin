@@ -186,9 +186,11 @@ This makes captures unambiguous: clicking a button always saves the specific thr
 
 ## Tampermonkey update shortcut
 
-A compact `↻ TM` button is pinned to the top-right of pages where the userscript runs. It opens Tampermonkey's installed-scripts dashboard so the browser extension can perform its own userscript update checks. Shift-click opens the Tampermonkey Beta dashboard.
+A compact `↻ TM` button is pinned to the top-right of pages where the userscript runs. On Chromium browsers it opens Tampermonkey's installed-scripts dashboard so the browser extension can perform its own userscript update checks; Shift-click targets Tampermonkey Beta.
 
-Tampermonkey does not expose a userscript API that can enumerate every installed script and silently trigger an update-all operation. The button therefore hands off to Tampermonkey's own update UI instead of imitating an unsupported update mechanism. For unattended updates, configure Tampermonkey's global userscript update interval and Automatic installation setting in the extension itself.
+Firefox uses a per-install `moz-extension://` UUID and does not expose that private dashboard URL to userscripts. On Firefox, the button therefore shows the exact Tampermonkey UI path instead of trying to open Chrome's `chrome-extension://` URL: Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates.
+
+Tampermonkey does not expose a userscript API that can enumerate every installed script and silently trigger an update-all operation. For unattended updates, configure Tampermonkey's global userscript update interval and Automatic installation setting in the extension itself.
 
 The same action is available from the userscript menu as `Agent OS: Open Tampermonkey update manager`.
 
