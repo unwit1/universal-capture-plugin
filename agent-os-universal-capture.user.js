@@ -4529,7 +4529,17 @@
         });
     }
 
-    function goodreadsStoreAddedSeries(info) {
+    function goodreadsBookInAddedSeries(bookId) {
+        bookId = String(bookId || "");
+        if (!bookId) return false;
+        var saved = goodreadsAddedSeries();
+        return Object.keys(saved).some(function (alias) {
+            var record = saved[alias];
+            return record && Array.isArray(record.book_ids) && record.book_ids.indexOf(bookId) !== -1;
+        });
+    }
+
+    function goodreadsStoreAddedSeries(info, books) {
         var aliases = goodreadsSeriesAliases(info);
         if (!aliases.length) return;
         var saved = goodreadsAddedSeries();
@@ -4537,6 +4547,9 @@
             id: info.id || "",
             title: info.title || "",
             url: info.url || "",
+            book_ids: (Array.isArray(books) ? books : []).map(function (book) {
+                return String(book && book.book_id || "");
+            }).filter(Boolean),
             added_at: new Date().toISOString()
         };
         aliases.forEach(function (alias) { saved[alias] = record; });
@@ -4737,7 +4750,9 @@
 
     function goodreadsRefreshSeriesIndicators() {
         document.querySelectorAll(".agent-os-goodreads-list-add").forEach(function (button) {
-            var added = goodreadsSeriesIsAdded(goodreadsButtonAliases(button));
+            var added =
+                goodreadsSeriesIsAdded(goodreadsButtonAliases(button)) ||
+                goodreadsBookInAddedSeries(button.dataset.agentOsBookId);
             button.dataset.agentOsSeriesAdded = added ? "1" : "0";
             if (!button.dataset.agentOsState) setButtonState(button, "", "");
         });
@@ -4767,8 +4782,10 @@
 
             var existing = link.nextElementSibling;
             if (existing && existing.classList && existing.classList.contains("agent-os-goodreads-list-add")) {
+                existing.dataset.agentOsBookId = bookId;
                 existing.dataset.agentOsSeriesAliases = aliases.join("|");
-                existing.dataset.agentOsSeriesAdded = goodreadsSeriesIsAdded(aliases) ? "1" : "0";
+                existing.dataset.agentOsSeriesAdded =
+                    (goodreadsSeriesIsAdded(aliases) || goodreadsBookInAddedSeries(bookId)) ? "1" : "0";
                 if (!existing.dataset.agentOsState) setButtonState(existing, "", "");
                 link.dataset.agentOsGoodreadsAdd = bookId;
                 return;
@@ -4779,8 +4796,10 @@
             button.type = "button";
             button.className = "agent-os-goodreads-list-add";
             button.dataset.agentOsGoodreadsList = "1";
+            button.dataset.agentOsBookId = bookId;
             button.dataset.agentOsSeriesAliases = aliases.join("|");
-            button.dataset.agentOsSeriesAdded = goodreadsSeriesIsAdded(aliases) ? "1" : "0";
+            button.dataset.agentOsSeriesAdded =
+                (goodreadsSeriesIsAdded(aliases) || goodreadsBookInAddedSeries(bookId)) ? "1" : "0";
             button.dataset.agentOsDefaultTitle =
                 "Add " + title + " to Agent OS. Ctrl-click or Shift-click to add the entire series.";
             button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
@@ -4819,7 +4838,10 @@
                     }
                     var resolvedAliases = goodreadsSeriesAliases(resolved.series);
                     button.dataset.agentOsSeriesAliases = resolvedAliases.join("|");
-                    goodreadsStoreAddedSeries(resolved.series);
+                    goodreadsStoreAddedSeries(
+                        resolved.series,
+                        resolved.capture && resolved.capture.metadata && resolved.capture.metadata.books
+                    );
                     sendCapture(resolved.capture, button);
                     return;
                 }
