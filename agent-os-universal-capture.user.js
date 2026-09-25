@@ -2863,16 +2863,32 @@
         return true;
     }
 
+    function isFirefoxBrowser() {
+        return /firefox/i.test(String(navigator.userAgent || ""));
+    }
+
+    function showTampermonkeyUpdateHelp() {
+        window.alert(
+            "Tampermonkey update check\n\n" +
+            "Firefox does not expose Tampermonkey's private moz-extension dashboard URL to userscripts, " +
+            "so Agent OS cannot open it directly.\n\n" +
+            "Click the Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates.\n\n" +
+            "For automatic updating, enable Tampermonkey's userscript update interval and Automatic installation setting."
+        );
+    }
+
     function openTampermonkeyUpdateManager(useBeta) {
+        if (isFirefoxBrowser()) {
+            showTampermonkeyUpdateHelp();
+            return;
+        }
+
         var url = useBeta ? TAMPERMONKEY_BETA_DASHBOARD : TAMPERMONKEY_STABLE_DASHBOARD;
         try {
             GM_openInTab(url, { active: true, insert: true, setParent: true });
         } catch (error) {
             console.warn("[Agent OS] Could not open Tampermonkey dashboard", error);
-            window.alert(
-                "Tampermonkey's dashboard could not be opened from this page.\n\n" +
-                "Open the Tampermonkey extension, then choose Utilities → Check for userscript updates."
-            );
+            showTampermonkeyUpdateHelp();
         }
     }
 
@@ -2886,9 +2902,10 @@
         button.type = "button";
         button.textContent = "↻ TM";
         button.setAttribute("aria-label", "Open Tampermonkey update manager");
-        button.title =
-            "Open Tampermonkey update manager. Tampermonkey itself must check/install updates for all scripts. " +
-            "Shift-click for Tampermonkey Beta.";
+        button.title = isFirefoxBrowser()
+            ? "Show Firefox instructions for checking all Tampermonkey userscript updates."
+            : "Open Tampermonkey update manager. Tampermonkey itself must check/install updates for all scripts. " +
+                "Shift-click for Tampermonkey Beta.";
         buttonCss(button);
         button.style.position = "fixed";
         button.style.top = "12px";
