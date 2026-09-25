@@ -3990,6 +3990,94 @@
         });
     }
 
+
+    function addGoodreadsBookControls() {
+        if (hostname().indexOf("goodreads.com") === -1) return;
+        var m = location.pathname.match(/\/book\/show\/(\d+)/i);
+        if (!m) return;
+        var bookId = m[1];
+        var titleNode = document.querySelector('[data-testid="bookTitle"], h1.Text__title1, h1');
+        var authorNode = document.querySelector('[data-testid="name"], .ContributorLink__name, a.authorName');
+        var host = titleNode || document.querySelector("main");
+        if (!host) return;
+        addFollowButtonOnce(host, "goodreads-book:" + bookId, function () {
+            return {
+                site: "goodreads",
+                target_type: "book",
+                source_id: "goodreads:book:" + bookId,
+                title: cleanText((titleNode && titleNode.textContent) || document.title),
+                author: cleanText(authorNode && authorNode.textContent),
+                url: canonicalUrl(),
+                metadata: { provider: "goodreads", book_id: bookId, follow_scope: "book_updates" }
+            };
+        }, "+ Follow book");
+        if (authorNode && authorNode.closest("a")) {
+            var a = authorNode.closest("a"), am = a.href.match(/\/author\/show\/(\d+)/i), aid = am ? am[1] : a.href;
+            addFollowButtonOnce(authorNode.parentElement || authorNode, "goodreads-author:" + aid, function () {
+                return {
+                    site: "goodreads", target_type: "creator",
+                    source_id: "goodreads:author:" + aid,
+                    title: cleanText(authorNode.textContent), author: cleanText(authorNode.textContent),
+                    url: a.href, metadata: { provider: "goodreads", author_id: aid }
+                };
+            }, "+ Follow author");
+        }
+    }
+
+    function serialSiteInfo() {
+        var h = hostname(), p = location.pathname;
+        var configs = [
+            { host: "royalroad.com", re: /\/fiction\/(\d+)/i, site: "royalroad", type: "web_serial" },
+            { host: "scribblehub.com", re: /\/series\/(\d+)/i, site: "scribblehub", type: "web_serial" },
+            { host: "webtoons.com", re: /\/[^/]+\/[^/]+\/list\?title_no=(\d+)/i, site: "webtoons", type: "web_comic", query: "title_no" },
+            { host: "tapas.io", re: /\/series\/([^/?#]+)/i, site: "tapas", type: "web_serial" }
+        ];
+        for (var i=0;i<configs.length;i+=1) {
+            var c=configs[i]; if (h.indexOf(c.host)===-1) continue;
+            var id="", m=p.match(c.re);
+            if (c.query) id=new URL(location.href).searchParams.get(c.query)||"";
+            else id=m?m[1]:"";
+            if (id) return { site:c.site, id:id, type:c.type };
+        }
+        return null;
+    }
+
+    function addSerialAndComicControls() {
+        var info=serialSiteInfo();
+        var rss=document.querySelector('link[type="application/rss+xml"], link[type="application/atom+xml"]');
+        if (!info && !rss) return;
+        var titleNode=document.querySelector("h1, .fic-title, .series-title, [class*='series-title'], [class*='title']");
+        var authorNode=document.querySelector('a[href*="/profile/"], a[href*="/user/"], a[href*="/creator/"], a[href*="/author/"], [class*="author"] a');
+        var host=titleNode || document.querySelector("main") || document.body;
+        if (info && host) {
+            addFollowButtonOnce(host, info.site + ":" + info.id, function () {
+                return {
+                    site:info.site, target_type:info.type, source_id:info.site+":"+info.type+":"+info.id,
+                    title:cleanText((titleNode&&titleNode.textContent)||document.title),
+                    author:cleanText(authorNode&&authorNode.textContent), url:canonicalUrl(),
+                    metadata:{provider:info.site, work_id:info.id, feed_url:rss&&rss.href||"", follow_scope:"new_installments"}
+                };
+            }, info.type==="web_comic"?"+ Follow comic":"+ Follow serial");
+        }
+        if (authorNode && host) {
+            var au=authorNode.href, an=cleanText(authorNode.textContent), key=info?info.site:hostname();
+            addFollowButtonOnce(authorNode.parentElement||authorNode, key+"-author:"+au, function(){
+                return {site:key,target_type:"creator",source_id:key+":creator:"+au,title:an,author:an,url:au,
+                    metadata:{provider:key,feed_url:rss&&rss.href||""}};
+            }, "+ Follow author");
+        }
+    }
+
+    function addGenericFeedFollowControl() {
+        var feed=document.querySelector('link[rel="alternate"][type="application/rss+xml"], link[rel="alternate"][type="application/atom+xml"]');
+        if (!feed || document.querySelector('.agent-os-follow-target[data-agent-os-follow-key="generic-feed"]')) return;
+        var host=document.querySelector("h1")||document.querySelector("header")||document.body;
+        addFollowButtonOnce(host,"generic-feed",function(){
+            return {site:hostname(),target_type:"feed",source_id:"feed:"+feed.href,title:cleanText(document.title),
+                url:canonicalUrl(),metadata:{provider:"rss-atom",feed_url:feed.href,follow_scope:"new_entries"}};
+        },"+ Follow updates");
+    }
+
     function addFollowControls() {
         addYouTubeFollowButtons();
         addNexusAuthorFollowButtons();
@@ -3999,6 +4087,9 @@
         addRedditUserFollowButtons();
         addDiscordUserFollowButtons();
         addGenericCreatorFollowButtons();
+        addGoodreadsBookControls();
+        addSerialAndComicControls();
+        addGenericFeedFollowControl();
     }
 
     function configureEndpoint() {
