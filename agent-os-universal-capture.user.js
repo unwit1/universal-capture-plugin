@@ -2824,12 +2824,24 @@
             onload: function (response) {
                 if (response.status >= 200 && response.status < 300) {
                     var duplicate = false;
+                    var responseBody = {};
                     try {
-                        var body = JSON.parse(response.responseText || "{}");
-                        duplicate = String(body.relationship || body.status || "").toLowerCase().indexOf("duplicate") !== -1;
+                        responseBody = JSON.parse(response.responseText || "{}");
+                        duplicate = String(responseBody.relationship || responseBody.status || "").toLowerCase().indexOf("duplicate") !== -1;
                     } catch (error) {
                         // Success does not require JSON.
                     }
+
+                    var creatorProfile = responseBody && responseBody.follow && responseBody.follow.creator;
+                    if (creatorProfile && button && button.__agentOsTargetFactory) {
+                        var followedTarget = button.__agentOsTargetFactory();
+                        if (followedTarget && followedTarget.target_type === "creator") {
+                            rememberCreatorTarget(followedTarget, creatorProfile);
+                            markCreatorFollowed(button, creatorProfile);
+                            window.setTimeout(refreshVisibleCreatorFollowButtons, 50);
+                        }
+                    }
+
                     setButtonState(button, duplicate ? "✓ Already Saved" : "✓ Saved", "ok");
                 } else {
                     var count = queueCapture(capture, "http-" + response.status);
@@ -4779,20 +4791,8 @@
             existing.remove();
         }
 
-        var button = followButton("AOS + Follow", "Follow this YouTube creator in Agent OS");
-        button.id = id;
-        button.dataset.agentOsCreatorKey = info.stable_id;
-        button.style.display = "inline-flex";
-        button.style.alignItems = "center";
-        button.style.verticalAlign = "middle";
-        button.style.margin = "0 0 0 8px";
-        button.style.padding = "5px 9px";
-        button.style.borderRadius = "12px";
-        button.style.whiteSpace = "nowrap";
-        button.addEventListener("click", function (event) {
-            event.preventDefault();
-            event.stopPropagation();
-            sendFollow({
+        function targetFactory() {
+            return {
                 site: "youtube",
                 target_type: "creator",
                 source_id: "youtube:creator:" + info.stable_id,
@@ -4806,9 +4806,27 @@
                     channel_id: info.channel_id || "",
                     route_type: info.route_type,
                     route_id: info.route_id,
+                    aliases: info.route_type === "handle" ? [info.route_id] : [],
                     creator_page: true
                 }
-            }, button);
+            };
+        }
+
+        var button = followButton("AOS + Follow", "Follow this YouTube creator in Agent OS");
+        button.id = id;
+        button.dataset.agentOsCreatorKey = info.stable_id;
+        button.style.display = "inline-flex";
+        button.style.alignItems = "center";
+        button.style.verticalAlign = "middle";
+        button.style.margin = "0 0 0 8px";
+        button.style.padding = "5px 9px";
+        button.style.borderRadius = "12px";
+        button.style.whiteSpace = "nowrap";
+        wireCreatorFollowStatus(button, targetFactory, true);
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            sendFollow(targetFactory(), button);
         });
 
         var host = info.title_node.parentElement || info.title_node;
@@ -4863,7 +4881,11 @@
                     title: cleanText(link.textContent) || "Nexus Mods author",
                     author: cleanText(link.textContent),
                     url: link.href,
-                    metadata: { provider: "nexusmods", user_id: userId }
+                    metadata: {
+                        provider: "nexusmods",
+                        user_id: userId,
+                        aliases: [cleanText(link.textContent)]
+                    }
                 };
             }, "+ Follow author");
         });
