@@ -4171,6 +4171,9 @@
             ".agent-os-discord-follow-row{position:relative!important;}" +
             ".agent-os-discord-follow-slot{position:absolute;right:6px;top:50%;transform:translateY(-50%);" +
             "z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;}" +
+            ".agent-os-discord-chat-author-host{position:relative!important;}" +
+            ".agent-os-discord-chat-follow-slot{position:absolute;right:100%;top:50%;transform:translate(-5px,-50%);" +
+            "z-index:8;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;}" +
             ".agent-os-discord-follow-button{width:24px;height:24px;min-width:24px;padding:0;margin:0;" +
             "display:inline-flex;align-items:center;justify-content:center;border-radius:6px;" +
             "border:1px solid rgba(255,255,255,.12);background:rgba(30,31,34,.88);color:#dbdee1;" +
@@ -4178,6 +4181,8 @@
             "opacity:0;transform:scale(.96);transition:opacity .12s ease,transform .12s ease,background .12s ease;" +
             "pointer-events:auto;}" +
             ".agent-os-discord-follow-row:hover>.agent-os-discord-follow-slot .agent-os-discord-follow-button," +
+            ".agent-os-discord-chat-message:hover .agent-os-discord-chat-follow-slot .agent-os-discord-follow-button," +
+            ".agent-os-discord-chat-author-host:hover>.agent-os-discord-chat-follow-slot .agent-os-discord-follow-button," +
             ".agent-os-discord-follow-button:focus-visible," +
             ".agent-os-discord-follow-button[data-agent-os-state='busy']," +
             ".agent-os-discord-follow-button[data-agent-os-state='ok']," +
@@ -4200,9 +4205,113 @@
         return cleanText(row.getAttribute && row.getAttribute("aria-label"));
     }
 
+    function discordUserIdFromMessage(messageRow) {
+        if (!messageRow || !messageRow.querySelector) return "";
+
+        // Standard Discord avatar CDN URLs include the stable numeric user ID.
+        var avatar = messageRow.querySelector(
+            'img[src*="cdn.discordapp.com/avatars/"], img[src*="media.discordapp.net/avatars/"]'
+        );
+        var avatarSrc = String(avatar && (avatar.currentSrc || avatar.src) || "");
+        var avatarMatch = avatarSrc.match(/\/avatars\/(\d{15,22})\//);
+        if (avatarMatch) return avatarMatch[1];
+
+        // Some Discord surfaces expose a user ID in data attributes.
+        var attributed = messageRow.querySelector(
+            '[data-user-id], [data-author-id], [data-userid], [data-authorid]'
+        );
+        if (attributed) {
+            var candidate =
+                attributed.getAttribute("data-user-id") ||
+                attributed.getAttribute("data-author-id") ||
+                attributed.getAttribute("data-userid") ||
+                attributed.getAttribute("data-authorid") ||
+                "";
+            var match = String(candidate).match(/\d{15,22}/);
+            if (match) return match[0];
+        }
+        return "";
+    }
+
+    function discordFollowTarget(name, userId, key) {
+        return {
+            site: "discord",
+            target_type: "creator",
+            source_id: "discord:user:" + key,
+            title: name || "Discord user",
+            author: name,
+            url: location.href,
+            metadata: {
+                provider: "discord",
+                user_id: userId,
+                display_name: name,
+                identity_confidence: userId ? "stable-id" : "display-name-only",
+                context_url: location.href
+            }
+        };
+    }
+
+    function makeDiscordFollowButton(name, targetFactory) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "agent-os-discord-follow-button";
+        button.textContent = "＋";
+        button.dataset.agentOsCompact = "1";
+        button.dataset.agentOsDefaultTitle = "Follow " + (name || "this Discord user") + " in Agent OS";
+        button.title = button.dataset.agentOsDefaultTitle;
+        button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var target = targetFactory();
+            if (target) sendFollow(target, button);
+        });
+        return button;
+    }
+
+    function addDiscordChatAuthorFollowButtons() {
+        document.querySelectorAll('[id^="message-username-"]').forEach(function (usernameNode) {
+            if (!usernameNode || !usernameNode.parentElement) return;
+            var idMatch = String(usernameNode.id || "").match(/message-username-(\d{15,22})/);
+            if (!idMatch) return;
+
+            var messageId = idMatch[1];
+            var messageRow =
+                usernameNode.closest('[id^="chat-messages-"], [data-list-item-id^="chat-messages"]') ||
+                usernameNode.closest("li") ||
+                usernameNode.parentElement;
+            if (!messageRow) return;
+
+            var name = cleanText(usernameNode.textContent);
+            if (!name) return;
+            var userId = discordUserIdFromMessage(messageRow);
+            var key = userId || name.toLowerCase();
+            var followKey = "discord-chat-user:" + key + ":" + messageId;
+            var host = usernameNode.parentElement;
+
+            messageRow.classList.add("agent-os-discord-chat-message");
+            host.classList.add("agent-os-discord-chat-author-host");
+
+            var existingSlots = host.querySelectorAll(":scope > .agent-os-discord-chat-follow-slot");
+            var existing = existingSlots.length ? existingSlots[0] : null;
+            for (var i = 1; i < existingSlots.length; i += 1) existingSlots[i].remove();
+            if (existing && existing.dataset.agentOsFollowKey === followKey) return;
+            if (existing) existing.remove();
+
+            var slot = document.createElement("span");
+            slot.className = "agent-os-discord-chat-follow-slot";
+            slot.dataset.agentOsFollowKey = followKey;
+            slot.appendChild(makeDiscordFollowButton(name, function () {
+                return discordFollowTarget(name, userId, key);
+            }));
+            host.insertBefore(slot, usernameNode);
+        });
+    }
+
     function addDiscordUserFollowButtons() {
         if (!isDiscordWeb()) return;
         ensureDiscordFollowStyles();
+        addDiscordChatAuthorFollowButtons();
 
         // Discord's member rows carry a stable data-list-item-id. Target the
         // row once instead of every descendant whose hashed class contains
@@ -4234,32 +4343,8 @@
             slot.className = "agent-os-discord-follow-slot";
             slot.dataset.agentOsFollowKey = followKey;
 
-            var button = document.createElement("button");
-            button.type = "button";
-            button.className = "agent-os-discord-follow-button";
-            button.textContent = "＋";
-            button.dataset.agentOsCompact = "1";
-            button.dataset.agentOsDefaultTitle = "Follow " + (name || "this Discord user") + " in Agent OS";
-            button.title = button.dataset.agentOsDefaultTitle;
-            button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
-            button.addEventListener("click", function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                sendFollow({
-                    site: "discord",
-                    target_type: "creator",
-                    source_id: "discord:user:" + key,
-                    title: name || "Discord user",
-                    author: name,
-                    url: location.href,
-                    metadata: {
-                        provider: "discord",
-                        user_id: userId,
-                        display_name: name,
-                        identity_confidence: userId ? "stable-id" : "display-name-only",
-                        context_url: location.href
-                    }
-                }, button);
+            var button = makeDiscordFollowButton(name, function () {
+                return discordFollowTarget(name, userId, key);
             });
             slot.appendChild(button);
             row.appendChild(slot);
