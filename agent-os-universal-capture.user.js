@@ -28,10 +28,8 @@
     "use strict";
 
     var VERSION = "3.13.10";
-    var TAMPERMONKEY_STABLE_DASHBOARD =
-        "chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=dashboard";
-    var TAMPERMONKEY_BETA_DASHBOARD =
-        "chrome-extension://gcalenpjmijncebpfijmoaglllgpjagf/options.html#nav=dashboard";
+    var AGENT_OS_USERSCRIPT_URL =
+        "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var SHEET_QUEUE_KEY = "agent_os_google_sheet_mirror_queue_v1";
@@ -2904,33 +2902,96 @@
         return true;
     }
 
-    function isFirefoxBrowser() {
-        return /firefox/i.test(String(navigator.userAgent || ""));
+    function closeTampermonkeyUpdatePanel() {
+        var existing = document.getElementById("agent-os-tampermonkey-update-panel");
+        if (existing) existing.remove();
+    }
+
+    function openAgentOsUserscriptUpdate() {
+        try {
+            GM_openInTab(AGENT_OS_USERSCRIPT_URL, {
+                active: true,
+                insert: true,
+                setParent: true
+            });
+        } catch (error) {
+            console.warn("[Agent OS] Could not open userscript update URL", error);
+            window.open(AGENT_OS_USERSCRIPT_URL, "_blank", "noopener,noreferrer");
+        }
     }
 
     function showTampermonkeyUpdateHelp() {
-        window.alert(
-            "Tampermonkey update check\n\n" +
-            "Firefox does not expose Tampermonkey's private moz-extension dashboard URL to userscripts, " +
-            "so Agent OS cannot open it directly.\n\n" +
-            "Click the Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates.\n\n" +
-            "For automatic updating, enable Tampermonkey's userscript update interval and Automatic installation setting."
-        );
+        closeTampermonkeyUpdatePanel();
+        if (!document.body) return;
+
+        var panel = document.createElement("div");
+        panel.id = "agent-os-tampermonkey-update-panel";
+        panel.style.position = "fixed";
+        panel.style.top = "42px";
+        panel.style.right = "12px";
+        panel.style.zIndex = "2147483647";
+        panel.style.width = "310px";
+        panel.style.padding = "12px";
+        panel.style.border = "1px solid rgba(255,255,255,.20)";
+        panel.style.borderRadius = "8px";
+        panel.style.background = "rgba(30,31,34,.98)";
+        panel.style.color = "#fff";
+        panel.style.font = "12px/1.45 system-ui,-apple-system,Segoe UI,sans-serif";
+        panel.style.boxShadow = "0 8px 28px rgba(0,0,0,.34)";
+
+        var heading = document.createElement("div");
+        heading.textContent = "Tampermonkey updates";
+        heading.style.fontWeight = "700";
+        heading.style.fontSize = "13px";
+        heading.style.marginBottom = "7px";
+
+        var body = document.createElement("div");
+        body.textContent =
+            "Browsers do not let a userscript open or control Tampermonkey's private extension dashboard reliably. " +
+            "To check every installed script: Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates.";
+        body.style.marginBottom = "10px";
+
+        var actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.gap = "7px";
+        actions.style.flexWrap = "wrap";
+
+        var aos = document.createElement("button");
+        aos.type = "button";
+        aos.textContent = "Update AOS";
+        buttonCss(aos);
+        aos.style.position = "static";
+        aos.style.padding = "6px 9px";
+        aos.style.boxShadow = "none";
+        aos.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            openAgentOsUserscriptUpdate();
+        });
+
+        var close = document.createElement("button");
+        close.type = "button";
+        close.textContent = "Close";
+        buttonCss(close);
+        close.style.position = "static";
+        close.style.padding = "6px 9px";
+        close.style.boxShadow = "none";
+        close.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeTampermonkeyUpdatePanel();
+        });
+
+        actions.appendChild(aos);
+        actions.appendChild(close);
+        panel.appendChild(heading);
+        panel.appendChild(body);
+        panel.appendChild(actions);
+        document.body.appendChild(panel);
     }
 
-    function openTampermonkeyUpdateManager(useBeta) {
-        if (isFirefoxBrowser()) {
-            showTampermonkeyUpdateHelp();
-            return;
-        }
-
-        var url = useBeta ? TAMPERMONKEY_BETA_DASHBOARD : TAMPERMONKEY_STABLE_DASHBOARD;
-        try {
-            GM_openInTab(url, { active: true, insert: true, setParent: true });
-        } catch (error) {
-            console.warn("[Agent OS] Could not open Tampermonkey dashboard", error);
-            showTampermonkeyUpdateHelp();
-        }
+    function openTampermonkeyUpdateManager() {
+        showTampermonkeyUpdateHelp();
     }
 
     function ensureTampermonkeyUpdateButton() {
@@ -2943,10 +3004,8 @@
         button.type = "button";
         button.textContent = "↻ TM";
         button.setAttribute("aria-label", "Open Tampermonkey update manager");
-        button.title = isFirefoxBrowser()
-            ? "Show Firefox instructions for checking all Tampermonkey userscript updates."
-            : "Open Tampermonkey update manager. Tampermonkey itself must check/install updates for all scripts. " +
-                "Shift-click for Tampermonkey Beta.";
+        button.title =
+            "Show Tampermonkey update instructions and an Update AOS shortcut.";
         buttonCss(button);
         button.style.position = "fixed";
         button.style.top = "12px";
@@ -2960,7 +3019,7 @@
         button.addEventListener("click", function (event) {
             event.preventDefault();
             event.stopPropagation();
-            openTampermonkeyUpdateManager(Boolean(event.shiftKey));
+            openTampermonkeyUpdateManager();
         });
         document.body.appendChild(button);
         return button;
@@ -5275,9 +5334,10 @@
 
     function registerMenus() {
         GM_registerMenuCommand("Agent OS: Save current page", function () { saveCurrent(null); });
-        GM_registerMenuCommand("Agent OS: Open Tampermonkey update manager", function () {
-            openTampermonkeyUpdateManager(false);
+        GM_registerMenuCommand("Agent OS: Tampermonkey update help", function () {
+            openTampermonkeyUpdateManager();
         });
+        GM_registerMenuCommand("Agent OS: Update this userscript", openAgentOsUserscriptUpdate);
         GM_registerMenuCommand("Agent OS: Configure endpoint", configureEndpoint);
         GM_registerMenuCommand("Agent OS: Configure device token", configureToken);
         GM_registerMenuCommand("Agent OS: Set device label", configureDevice);
