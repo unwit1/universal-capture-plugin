@@ -4943,7 +4943,49 @@
         return { owner: m[1], repo: m[2].replace(/\.git$/i, "") };
     }
 
+    function githubCreatorInfo() {
+        if (hostname() !== "github.com") return null;
+        var segments = location.pathname.split("/").filter(Boolean);
+        if (segments.length !== 1) return null;
+        var username = segments[0];
+        var reserved = /^(settings|marketplace|explore|topics|collections|events|sponsors|notifications|pulls|issues|codespaces|organizations|orgs|login|signup|features|enterprise|pricing)$/i;
+        if (reserved.test(username)) return null;
+
+        var nameNode = document.querySelector(
+            ".vcard-fullname, [itemprop='name'], " +
+            "[data-testid='profile-name'], main h1"
+        );
+        var displayName = cleanText(nameNode && nameNode.textContent) || username;
+        return {
+            username: username,
+            display_name: displayName,
+            url: "https://github.com/" + username,
+            host: (nameNode && nameNode.parentElement) || nameNode || document.querySelector("main")
+        };
+    }
+
     function addGitHubFollowButtons() {
+        var creator = githubCreatorInfo();
+        if (creator && creator.host) {
+            addFollowButtonOnce(creator.host, "github-creator:" + creator.username.toLowerCase(), function () {
+                return {
+                    site: "github",
+                    target_type: "creator",
+                    source_id: "github:creator:" + creator.username.toLowerCase(),
+                    title: creator.display_name || creator.username,
+                    author: creator.display_name || creator.username,
+                    url: creator.url,
+                    canonical_url: creator.url,
+                    metadata: {
+                        provider: "github",
+                        username: creator.username,
+                        repository_owner: creator.username,
+                        aliases: [creator.username]
+                    }
+                };
+            }, "AOS + Follow");
+        }
+
         var info = githubRepoInfo();
         if (!info) return;
         var repoName = info.owner + "/" + info.repo;
