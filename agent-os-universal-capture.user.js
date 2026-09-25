@@ -4438,8 +4438,129 @@
     }
 
 
+    function goodreadsBookIdFromUrl(urlText) {
+        try {
+            var u = new URL(urlText, location.href);
+            var m = u.pathname.match(/\/book\/show\/(\d+)/i);
+            return m ? m[1] : "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function goodreadsListBookCapture(link, bookId) {
+        var title = cleanText(link && link.textContent);
+        var container = link && link.closest
+            ? link.closest(
+                "tr, li, article, .elementList, .bookalike, .review, " +
+                "[class*='BookCard'], [class*='bookCard'], [class*='SearchResult'], [class*='bookRow']"
+            )
+            : null;
+        container = container || (link && link.parentElement) || document.body;
+
+        var authorNode = container && container.querySelector
+            ? container.querySelector(
+                "a.authorName, a[href*='/author/show/'], " +
+                "[class*='ContributorLink'] a, [data-testid='name']"
+            )
+            : null;
+        var imageNode = container && container.querySelector
+            ? container.querySelector("img[src]")
+            : null;
+
+        var bookUrl = "";
+        try {
+            var u = new URL(link.href, location.href);
+            u.search = "";
+            u.hash = "";
+            bookUrl = u.toString();
+        } catch (error) {
+            bookUrl = String(link && link.href || "");
+        }
+
+        var capture = genericCapture();
+        capture.site = "goodreads";
+        capture.content_type = "book";
+        capture.source_id = "goodreads:book:" + bookId;
+        capture.title = title || capture.title;
+        capture.author = cleanText(authorNode && authorNode.textContent);
+        capture.url = bookUrl;
+        capture.canonical_url = bookUrl;
+        capture.image = String(imageNode && (imageNode.currentSrc || imageNode.src) || "");
+        capture.intent = "save";
+        capture.metadata = Object.assign({}, capture.metadata, {
+            adapter: "goodreads-list-item",
+            provider: "goodreads",
+            book_id: bookId,
+            source_view_url: location.href,
+            source_view_title: cleanText(document.title)
+        });
+        return capture;
+    }
+
+    function addGoodreadsListBookButtons() {
+        if (hostname().indexOf("goodreads.com") === -1) return;
+
+        document.querySelectorAll(
+            "a.bookTitle[href*='/book/show/'], " +
+            "a.BookTitle__title[href*='/book/show/'], " +
+            "a[data-testid='bookTitle'][href*='/book/show/'], " +
+            "a[href*='/book/show/']"
+        ).forEach(function (link) {
+            if (!link || !link.parentElement) return;
+            var title = cleanText(link.textContent);
+            var bookId = goodreadsBookIdFromUrl(link.href);
+            if (!bookId || !title) return;
+
+            // Ignore non-title navigational links that happen to point at a
+            // book page. Goodreads' cover-image links have no text and are
+            // already excluded above.
+            if (/^(ratings?|reviews?|read|more)$/i.test(title)) return;
+            if (link.dataset.agentOsGoodreadsAdd === bookId) return;
+
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "agent-os-goodreads-list-add";
+            button.textContent = "＋";
+            button.dataset.agentOsCompact = "1";
+            button.dataset.agentOsDefaultTitle = "Add " + title + " to Agent OS";
+            button.title = button.dataset.agentOsDefaultTitle;
+            button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
+            button.style.display = "inline-flex";
+            button.style.alignItems = "center";
+            button.style.justifyContent = "center";
+            button.style.verticalAlign = "middle";
+            button.style.width = "22px";
+            button.style.height = "22px";
+            button.style.minWidth = "22px";
+            button.style.margin = "0 0 0 7px";
+            button.style.padding = "0";
+            button.style.border = "1px solid rgba(0,0,0,.2)";
+            button.style.borderRadius = "50%";
+            button.style.background = "#fff";
+            button.style.color = "#382110";
+            button.style.font = "700 14px/1 system-ui, -apple-system, Segoe UI, sans-serif";
+            button.style.boxShadow = "none";
+            button.style.cursor = "pointer";
+
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                sendCapture(goodreadsListBookCapture(link, bookId), button);
+            });
+
+            link.dataset.agentOsGoodreadsAdd = bookId;
+            link.insertAdjacentElement("afterend", button);
+        });
+    }
+
     function addGoodreadsBookControls() {
         if (hostname().indexOf("goodreads.com") === -1) return;
+
+        // Goodreads list/search/shelf/recommendation surfaces get a compact
+        // per-book + button immediately to the right of each rendered title.
+        addGoodreadsListBookButtons();
+
         var m = location.pathname.match(/\/book\/show\/(\d+)/i);
         if (!m) return;
         var bookId = m[1];
