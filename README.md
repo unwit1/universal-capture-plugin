@@ -45,6 +45,14 @@ By default, if no primary Agent OS endpoint is configured, captures are queued l
 See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 
+## YouTube video-title capture
+
+YouTube video titles now get a compact `AOS +` button immediately to their right on supported rendered list surfaces such as Home, search results, subscriptions/recommendations, compact/sidebar videos, and playlist-style rows. The current watch-page title also gets the same control.
+
+Clicking `AOS +` adds that specific video to Agent OS using the YouTube video ID, title, nearby channel name when available, canonical watch URL, thumbnail when available, and the page where the video was discovered. The same capture also follows the configured Google Sheet mirror path.
+
+Buttons are keyed by video ID and reinjected idempotently as YouTube's SPA rerenders content, so repeated scans should not stack duplicate controls beside the same rendered title.
+
 ## Goodreads list capture
 
 Goodreads list-style surfaces—including shelves, search/results pages, and rendered recommendation/list cards—get a compact `AOS +` button immediately to the right of each detected book title. A normal click saves that specific book to Agent OS using its Goodreads book ID, title, nearby author, book URL, cover image when available, and the source list/page where it was found. The same capture also uses the configured Google Sheet mirror.
