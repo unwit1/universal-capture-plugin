@@ -4353,6 +4353,19 @@
             };
         });
 
+        var targetLinks = target.metadata && Array.isArray(target.metadata.profile_links)
+            ? target.metadata.profile_links
+            : [];
+        targetLinks.forEach(function (link) {
+            var linkUrl = String(link && typeof link === "object" ? link.url : link || "");
+            if (!linkUrl) return;
+            saved.keys[linkUrl] = {
+                creator_id: profile && profile.creator_id || "",
+                display_name: profile && profile.display_name || target.author || target.title || "",
+                updated_at: now
+            };
+        });
+
         if (profile) {
             (profile.accounts || []).forEach(function (account) {
                 var accountKey = String(account.source_id || account.canonical_url || account.url || "");
@@ -4371,6 +4384,15 @@
                 saved.aliases[normalized] = {
                     creator_id: profile.creator_id || "",
                     display_name: profile.display_name || alias.value || "",
+                    updated_at: now
+                };
+            });
+            (profile.links || []).forEach(function (link) {
+                var linkUrl = String(link && (link.canonical_url || link.url) || "");
+                if (!linkUrl) return;
+                saved.keys[linkUrl] = {
+                    creator_id: profile.creator_id || "",
+                    display_name: profile.display_name || "",
                     updated_at: now
                 };
             });
