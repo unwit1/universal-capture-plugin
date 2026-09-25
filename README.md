@@ -202,15 +202,13 @@ On Reddit, the same rule applies: the page-wide floating button is suppressed, a
 This makes captures unambiguous: clicking a button always saves the specific thread/post attached to that button rather than the surrounding listing/feed page.
 
 
-## Tampermonkey update shortcut
+## Agent OS userscript update shortcut
 
-A compact `↻ TM` button is pinned to the top-right of pages where the userscript runs. It no longer attempts to navigate to any private `chrome-extension://` or `moz-extension://` URL, because those extension-internal addresses are browser/install-specific and are not reliably reachable from a userscript.
+A compact `AOS ↻` button is pinned to the top-right of pages where the userscript runs. Clicking it directly opens the latest public Agent OS `.user.js` URL so Tampermonkey can update or reinstall this userscript.
 
-Clicking the button opens a small in-page Agent OS panel with the exact Tampermonkey path for checking every installed userscript: Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates. The panel also provides an **Update AOS** shortcut that opens the public Agent OS userscript URL, which lets Tampermonkey update/reinstall this userscript directly.
+The permanent page button is intentionally scoped to Agent OS itself. Tampermonkey does not expose a userscript API that can enumerate every installed script and silently trigger an update-all operation, so the page no longer dedicates screen space to an ineffective "update all Tampermonkey scripts" shortcut.
 
-Tampermonkey does not expose a userscript API that can enumerate every installed script and silently trigger an update-all operation. For unattended updates, configure Tampermonkey's global userscript update interval and Automatic installation setting in the extension itself.
-
-The same actions are available from the userscript menu as `Agent OS: Tampermonkey update help` and `Agent OS: Update this userscript`.
+The userscript menu still includes `Agent OS: Tampermonkey update help` for the manual all-scripts path (Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates) and `Agent OS: Update this userscript` for the same direct Agent OS update action.
 
 ## Google Sheet mirror
 
