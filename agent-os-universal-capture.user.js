@@ -4315,10 +4315,135 @@
         }
     }
 
+    function youtubeCreatorPageInfo() {
+        if (hostname().indexOf("youtube.com") === -1) return null;
+
+        var path = String(location.pathname || "");
+        var match =
+            path.match(/^\/@([^/?#]+)/i) ||
+            path.match(/^\/channel\/([^/?#]+)/i) ||
+            path.match(/^\/c\/([^/?#]+)/i) ||
+            path.match(/^\/user\/([^/?#]+)/i);
+        if (!match) return null;
+
+        var routeType = path.indexOf("/@") === 0 ? "handle" :
+            path.indexOf("/channel/") === 0 ? "channel" :
+            path.indexOf("/c/") === 0 ? "custom" : "user";
+        var routeId = match[1];
+
+        var metaChannelId = cleanText(
+            (document.querySelector('meta[itemprop="channelId"]') || {}).content ||
+            (document.querySelector('meta[name="channelId"]') || {}).content ||
+            ""
+        );
+        var canonical = document.querySelector('link[rel="canonical"]');
+        var canonicalHref = String(canonical && canonical.href || "");
+        var canonicalChannelId = profileIdFromHref(canonicalHref, /\/channel\/([^/?#]+)/i);
+        var channelId = metaChannelId || canonicalChannelId || "";
+
+        var titleSelectors = [
+            "ytd-channel-page #channel-name #text",
+            "ytd-channel-page #channel-name",
+            "ytd-channel-header-renderer #channel-name #text",
+            "ytd-channel-header-renderer #channel-name",
+            "#channel-header-container #channel-name #text",
+            "#channel-header-container #channel-name",
+            "yt-page-header-renderer h1",
+            "ytd-page-header-renderer h1",
+            "#page-header h1",
+            "ytd-channel-page h1"
+        ];
+        var titleNode = null;
+        for (var i = 0; i < titleSelectors.length; i += 1) {
+            var candidate = document.querySelector(titleSelectors[i]);
+            if (candidate && cleanText(candidate.textContent)) {
+                titleNode = candidate;
+                break;
+            }
+        }
+
+        var channelName = cleanText(titleNode && titleNode.textContent);
+        if (!channelName) {
+            channelName = cleanText(
+                (document.querySelector('meta[property="og:title"]') || {}).content ||
+                document.title.replace(/\s*-\s*YouTube\s*$/i, "")
+            );
+        }
+
+        var stableId = channelId || (routeType + ":" + routeId.toLowerCase());
+        var canonicalUrl = channelId
+            ? "https://www.youtube.com/channel/" + channelId
+            : (routeType === "handle"
+                ? "https://www.youtube.com/@" + routeId
+                : location.origin + "/" + (routeType === "custom" ? "c" : routeType) + "/" + routeId);
+
+        return {
+            channel_id: channelId,
+            route_type: routeType,
+            route_id: routeId,
+            stable_id: stableId,
+            name: channelName || routeId,
+            url: canonicalUrl,
+            title_node: titleNode
+        };
+    }
+
+    function addYouTubeCreatorPageFollowButton() {
+        var info = youtubeCreatorPageInfo();
+        if (!info || !info.title_node) return;
+
+        var id = "agent-os-youtube-creator-page-follow";
+        var existing = document.getElementById(id);
+        if (existing) {
+            if (existing.dataset.agentOsCreatorKey === info.stable_id) return;
+            existing.remove();
+        }
+
+        var button = followButton("AOS + Follow", "Follow this YouTube creator in Agent OS");
+        button.id = id;
+        button.dataset.agentOsCreatorKey = info.stable_id;
+        button.style.display = "inline-flex";
+        button.style.alignItems = "center";
+        button.style.verticalAlign = "middle";
+        button.style.margin = "0 0 0 8px";
+        button.style.padding = "5px 9px";
+        button.style.borderRadius = "12px";
+        button.style.whiteSpace = "nowrap";
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            sendFollow({
+                site: "youtube",
+                target_type: "creator",
+                source_id: "youtube:creator:" + info.stable_id,
+                title: info.name || "YouTube creator",
+                author: info.name || "",
+                url: info.url,
+                canonical_url: info.url,
+                metadata: {
+                    provider: "youtube",
+                    creator_id: info.channel_id || info.route_id,
+                    channel_id: info.channel_id || "",
+                    route_type: info.route_type,
+                    route_id: info.route_id,
+                    creator_page: true
+                }
+            }, button);
+        });
+
+        var host = info.title_node.parentElement || info.title_node;
+        if (host && host.style) {
+            host.style.display = host.style.display || "flex";
+            host.style.alignItems = host.style.alignItems || "center";
+        }
+        info.title_node.insertAdjacentElement("afterend", button);
+    }
+
     function addYouTubeFollowButtons() {
         if (hostname().indexOf("youtube.com") === -1 && hostname() !== "youtu.be") return;
 
         addYouTubeVideoTitleButtons();
+        addYouTubeCreatorPageFollowButton();
 
         var channelLink = document.querySelector(
             "#owner ytd-channel-name a[href], ytd-watch-metadata ytd-channel-name a[href], " +
