@@ -45,9 +45,11 @@ By default, if no primary Agent OS endpoint is configured, captures are queued l
 See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 
-## Discord member-list controls
+## Discord follow controls
 
-Discord's member list uses one compact Agent OS control per member row. The control is hidden until hover/focus, does not add row height, and is keyed to Discord's stable member-row ID when available. Repeated Discord SPA rerenders reuse or replace that one control instead of injecting duplicate `+ Follow` buttons into usernames, messages, activities, or member rows.
+Discord's member list uses one compact Agent OS control per member row. Normal chat messages also get a tiny `+` immediately to the left of the visible author name; it appears only while the message/author is hovered or the control is focused. Clicking it follows that Discord user through the same Agent OS capture path and Google Sheet mirror.
+
+Both controls are idempotent across Discord SPA rerenders. Member-list controls are keyed to Discord's stable member-row ID when available, while chat controls are keyed to the rendered message header and user identity when available. The script removes stale duplicate controls rather than injecting repeated buttons into usernames, activities, or message rows.
 
 ## Discord passive indexing
 
