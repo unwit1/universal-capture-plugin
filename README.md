@@ -45,6 +45,12 @@ By default, if no primary Agent OS endpoint is configured, captures are queued l
 See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 
+## Goodreads list capture
+
+Goodreads list-style surfaces—including shelves, search/results pages, and rendered recommendation/list cards—get a compact circular `+` immediately to the right of each detected book title. Clicking it saves that specific book to Agent OS using its Goodreads book ID, title, nearby author, book URL, cover image when available, and the source list/page where it was found. The same capture also uses the configured Google Sheet mirror.
+
+The control is idempotent across Goodreads dynamic rerenders, so rescanning the page does not stack duplicate buttons beside the same title.
+
 ## Discord follow controls
 
 Discord's member list uses one compact Agent OS control per member row. Normal chat messages also get a tiny `+` immediately to the left of the visible author name; it appears only while the message/author is hovered or the control is focused. Clicking it follows that Discord user through the same Agent OS capture path and Google Sheet mirror.
