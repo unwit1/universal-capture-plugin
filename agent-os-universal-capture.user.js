@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.12.2
+// @version      3.13.0
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -26,7 +26,7 @@
 (function () {
     "use strict";
 
-    var VERSION = "3.12.2";
+    var VERSION = "3.13.0";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var MAX_QUEUE = 500;
@@ -3700,6 +3700,307 @@
         });
     }
 
+
+    // -- Cross-site follow targets --------------------------------------------
+
+    function followButton(label, title) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label || "+ Follow";
+        button.className = "agent-os-follow-target";
+        buttonCss(button);
+        button.style.padding = "5px 8px";
+        button.style.margin = "4px 6px";
+        button.style.fontSize = "12px";
+        button.title = title || "Follow this in Agent OS";
+        return button;
+    }
+
+    function followCapture(target) {
+        var base = genericCapture();
+        target = target || {};
+        base.content_type = "follow_target";
+        base.intent = "follow";
+        base.site = target.site || base.site;
+        base.source_id = target.source_id || "";
+        base.title = cleanText(target.title || base.title);
+        base.author = cleanText(target.author || "");
+        base.url = target.url || location.href;
+        base.canonical_url = target.canonical_url || base.url;
+        base.description = cleanText(target.description || "");
+        base.metadata = Object.assign({}, base.metadata, target.metadata || {}, {
+            adapter: "follow-target",
+            follow_target_type: target.target_type || "entity",
+            follow_scope: target.follow_scope || "new_activity",
+            discovered_from: location.href
+        });
+        return base;
+    }
+
+    function sendFollow(target, button) {
+        sendCapture(followCapture(target), button);
+    }
+
+    function profileIdFromHref(href, pattern) {
+        try {
+            var u = new URL(href, location.href);
+            var m = u.pathname.match(pattern);
+            return m ? m[1] : "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function addFollowButtonOnce(host, key, targetFactory, label) {
+        if (!host || !targetFactory) return;
+        var selector = '.agent-os-follow-target[data-agent-os-follow-key="' + key.replace(/"/g, "") + '"]';
+        if (host.querySelector && host.querySelector(selector)) return;
+        var button = followButton(label || "+ Follow", "Follow this creator, user, video, or project in Agent OS");
+        button.dataset.agentOsFollowKey = key;
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var target = targetFactory();
+            if (target) sendFollow(target, button);
+        });
+        host.appendChild(button);
+    }
+
+    function addYouTubeFollowButtons() {
+        if (hostname().indexOf("youtube.com") === -1 && hostname() !== "youtu.be") return;
+
+        var videoId = youtubeVideoId();
+        if (videoId) {
+            var videoHost = document.querySelector("#title.ytd-watch-metadata, #above-the-fold #title, ytd-watch-metadata h1");
+            if (videoHost) addFollowButtonOnce(videoHost, "youtube-video:" + videoId, function () {
+                return {
+                    site: "youtube",
+                    target_type: "video",
+                    source_id: "youtube:video:" + videoId,
+                    title: cleanText((document.querySelector("h1.ytd-watch-metadata, h1.title") || {}).textContent || document.title),
+                    author: cleanText((document.querySelector("ytd-channel-name a, #owner-name a") || {}).textContent),
+                    url: "https://www.youtube.com/watch?v=" + videoId,
+                    metadata: { video_id: videoId, provider: "youtube" }
+                };
+            }, "+ Follow video");
+        }
+
+        var channelLink = document.querySelector(
+            "#owner ytd-channel-name a[href], ytd-watch-metadata ytd-channel-name a[href], " +
+            "ytd-channel-header-renderer #channel-name a[href], #channel-header-container #channel-name a[href]"
+        );
+        if (channelLink) {
+            var channelHref = channelLink.href;
+            var channelName = cleanText(channelLink.textContent);
+            var channelId = profileIdFromHref(channelHref, /\/channel\/([^/?#]+)/i) ||
+                profileIdFromHref(channelHref, /\/@([^/?#]+)/i) || channelName;
+            var channelHost = channelLink.parentElement || channelLink;
+            addFollowButtonOnce(channelHost, "youtube-channel:" + channelId, function () {
+                return {
+                    site: "youtube",
+                    target_type: "creator",
+                    source_id: "youtube:creator:" + channelId,
+                    title: channelName || "YouTube creator",
+                    author: channelName,
+                    url: channelHref,
+                    metadata: { provider: "youtube", creator_id: channelId }
+                };
+            }, "+ Follow creator");
+        }
+    }
+
+    function addNexusAuthorFollowButtons() {
+        if (hostname().indexOf("nexusmods.com") === -1) return;
+        document.querySelectorAll('a[href*="/users/"]').forEach(function (link) {
+            var userId = profileIdFromHref(link.href, /\/users\/(\d+)/i);
+            if (!userId) return;
+            var host = link.parentElement || link;
+            addFollowButtonOnce(host, "nexus-author:" + userId, function () {
+                return {
+                    site: "nexusmods",
+                    target_type: "creator",
+                    source_id: "nexus:author:" + userId,
+                    title: cleanText(link.textContent) || "Nexus Mods author",
+                    author: cleanText(link.textContent),
+                    url: link.href,
+                    metadata: { provider: "nexusmods", user_id: userId }
+                };
+            }, "+ Follow author");
+        });
+    }
+
+    function addXenforoAuthorFollowButtons() {
+        var hostName = hostname();
+        var known = hostName.indexOf("spacebattles.com") !== -1 || hostName.indexOf("questionablequesting.com") !== -1;
+        var looksXenforo = known || Boolean(document.querySelector('html[data-template], meta[name="theme-color"]'));
+        if (!looksXenforo) return;
+        document.querySelectorAll('a.username[href*="/members/"], .message-name a[href*="/members/"]').forEach(function (link) {
+            var memberId = profileIdFromHref(link.href, /\/members\/(?:[^/.]+\.)?(\d+)/i) || link.href;
+            var host = link.parentElement || link;
+            addFollowButtonOnce(host, "xenforo-author:" + memberId, function () {
+                return {
+                    site: known ? (hostName.indexOf("spacebattles") !== -1 ? "spacebattles" : "questionablequesting") : hostName,
+                    target_type: "creator",
+                    source_id: "xenforo:author:" + memberId,
+                    title: cleanText(link.textContent) || "Forum author",
+                    author: cleanText(link.textContent),
+                    url: link.href,
+                    metadata: { provider: "xenforo", member_id: memberId, forum_host: hostName }
+                };
+            }, "+ Follow author");
+        });
+    }
+
+    function addPatreonFollowButtons() {
+        if (hostname().indexOf("patreon.com") === -1) return;
+        var m = location.pathname.match(/^\/(?:c\/)?([^/?#]+)/i);
+        if (!m || /^(home|explore|search|login|signup|settings|messages)$/i.test(m[1])) return;
+        var slug = m[1];
+        var heading = document.querySelector("h1, [data-tag='creator-name']");
+        var targetHost = heading || document.querySelector("main");
+        if (!targetHost) return;
+        addFollowButtonOnce(targetHost, "patreon-creator:" + slug, function () {
+            return {
+                site: "patreon",
+                target_type: "creator",
+                source_id: "patreon:creator:" + slug.toLowerCase(),
+                title: cleanText((heading && heading.textContent) || document.title),
+                author: cleanText((heading && heading.textContent) || ""),
+                url: location.origin + location.pathname,
+                metadata: { provider: "patreon", creator_slug: slug }
+            };
+        }, "+ Follow creator");
+    }
+
+    function githubRepoInfo() {
+        if (hostname() !== "github.com") return null;
+        var m = location.pathname.match(/^\/([^/]+)\/([^/]+?)(?:\/|$)/);
+        if (!m) return null;
+        var reserved = /^(settings|marketplace|explore|topics|collections|events|sponsors|notifications|pulls|issues|codespaces|organizations|orgs)$/i;
+        if (reserved.test(m[1])) return null;
+        return { owner: m[1], repo: m[2].replace(/\.git$/i, "") };
+    }
+
+    function addGitHubFollowButtons() {
+        var info = githubRepoInfo();
+        if (!info) return;
+        var repoName = info.owner + "/" + info.repo;
+        var host = document.querySelector("#repository-container-header .AppHeader-context, #repository-container-header h1, strong.mr-2");
+        if (!host) return;
+        addFollowButtonOnce(host, "github-repo:" + repoName, function () {
+            return {
+                site: "github",
+                target_type: "project",
+                source_id: "github:repo:" + repoName.toLowerCase(),
+                title: repoName,
+                author: info.owner,
+                url: "https://github.com/" + repoName,
+                metadata: { provider: "github", owner: info.owner, repository: info.repo }
+            };
+        }, "+ Follow project");
+    }
+
+    function addRedditUserFollowButtons() {
+        if (hostname().indexOf("reddit.com") === -1) return;
+        document.querySelectorAll('a[href*="/user/"], a[href*="/u/"]').forEach(function (link) {
+            var user = profileIdFromHref(link.href, /\/(?:user|u)\/([^/?#]+)/i);
+            if (!user) return;
+            var host = link.parentElement || link;
+            addFollowButtonOnce(host, "reddit-user:" + user.toLowerCase(), function () {
+                return {
+                    site: "reddit",
+                    target_type: "creator",
+                    source_id: "reddit:user:" + user.toLowerCase(),
+                    title: "u/" + user,
+                    author: user,
+                    url: "https://www.reddit.com/user/" + user + "/",
+                    metadata: { provider: "reddit", username: user }
+                };
+            }, "+ Follow user");
+        });
+    }
+
+    function addDiscordUserFollowButtons() {
+        if (!isDiscordWeb()) return;
+        document.querySelectorAll(
+            '[class*="message"] [class*="username"], [class*="member"] [class*="name"], ' +
+            '[class*="userPopout"] [class*="nickname"], [class*="userPopout"] [class*="username"]'
+        ).forEach(function (node) {
+            if (!node || !cleanText(node.textContent)) return;
+            var name = cleanText(node.textContent);
+            var container = node.closest('[data-list-item-id], [id^="chat-messages-"], [class*="userPopout"], [class*="member"]') || node.parentElement;
+            if (!container) return;
+            var rawId = cleanText(container.getAttribute && (container.getAttribute("data-list-item-id") || container.id));
+            var idMatch = rawId.match(/(\d{15,22})/);
+            var userId = idMatch ? idMatch[1] : "";
+            var key = userId || name.toLowerCase();
+            addFollowButtonOnce(node.parentElement || node, "discord-user:" + key, function () {
+                return {
+                    site: "discord",
+                    target_type: "creator",
+                    source_id: "discord:user:" + key,
+                    title: name,
+                    author: name,
+                    url: location.href,
+                    metadata: {
+                        provider: "discord",
+                        user_id: userId,
+                        display_name: name,
+                        identity_confidence: userId ? "stable-id" : "display-name-only",
+                        context_url: location.href
+                    }
+                };
+            }, "+ Follow");
+        });
+    }
+
+    function addGenericCreatorFollowButtons() {
+        // Lightweight adapters for creator-centric sites where profile URLs are stable.
+        var configs = [
+            { host: "twitch.tv", re: /^\/([^/?#]+)/, site: "twitch", label: "+ Follow creator" },
+            { host: "medium.com", re: /^\/@([^/?#]+)/, site: "medium", label: "+ Follow author" },
+            { host: "substack.com", re: /^\/?$/, site: "substack", label: "+ Follow publication", subdomain: true },
+            { host: "ko-fi.com", re: /^\/([^/?#]+)/, site: "ko-fi", label: "+ Follow creator" },
+            { host: "itch.io", re: /^\/?$/, site: "itch", label: "+ Follow creator", subdomain: true }
+        ];
+        configs.forEach(function (cfg) {
+            var h = hostname();
+            var matches = h === cfg.host || h.endsWith("." + cfg.host);
+            if (!matches) return;
+            var id = "";
+            if (cfg.subdomain) id = h === cfg.host ? "" : h.slice(0, -(cfg.host.length + 1));
+            else {
+                var m = location.pathname.match(cfg.re);
+                id = m ? m[1] : "";
+            }
+            if (!id) return;
+            var heading = document.querySelector("h1") || document.querySelector("main");
+            if (!heading) return;
+            addFollowButtonOnce(heading, cfg.site + ":" + id, function () {
+                return {
+                    site: cfg.site,
+                    target_type: "creator",
+                    source_id: cfg.site + ":creator:" + id.toLowerCase(),
+                    title: cleanText((document.querySelector("h1") || {}).textContent || id),
+                    author: cleanText((document.querySelector("h1") || {}).textContent || id),
+                    url: location.origin + location.pathname,
+                    metadata: { provider: cfg.site, creator_id: id }
+                };
+            }, cfg.label);
+        });
+    }
+
+    function addFollowControls() {
+        addYouTubeFollowButtons();
+        addNexusAuthorFollowButtons();
+        addXenforoAuthorFollowButtons();
+        addPatreonFollowButtons();
+        addGitHubFollowButtons();
+        addRedditUserFollowButtons();
+        addDiscordUserFollowButtons();
+        addGenericCreatorFollowButtons();
+    }
+
     function configureEndpoint() {
         var settings = loadSettings();
         var endpoint = window.prompt(
@@ -3855,6 +4156,7 @@
     addRedditPostButtons();
     addStorySiteButtons();
     addAmazonControls();
+    addFollowControls();
     if (isDiscordWeb()) {
         ensureDiscordStatus();
         scheduleDiscordScan(0);
@@ -3892,6 +4194,7 @@
             addRedditPostButtons();
             addStorySiteButtons();
             addAmazonControls();
+            addFollowControls();
             ensureJournalStatus();
             if (isDiscordWeb()) ensureDiscordStatus();
         }, 300);
