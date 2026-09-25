@@ -35,6 +35,7 @@
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var SHEET_QUEUE_KEY = "agent_os_google_sheet_mirror_queue_v1";
+    var GOODREADS_SERIES_KEY = "agent_os_goodreads_added_series_v1";
     var MAX_QUEUE = 500;
     var SHEET_QUEUE_MAX = 5000;
 
@@ -2714,6 +2715,27 @@
     function setButtonState(button, label, kind) {
         if (!button) return;
         button.dataset.agentOsState = kind || "";
+
+        if (button.dataset.agentOsGoodreadsList === "1") {
+            var seriesAdded = button.dataset.agentOsSeriesAdded === "1";
+            if (kind === "busy") button.textContent = "AOS …";
+            else if (kind === "ok") button.textContent = "AOS ✓";
+            else if (kind === "error") button.textContent = "AOS !";
+            else button.textContent = seriesAdded ? "AOS S✓" : "AOS +";
+            button.title = kind === "busy"
+                ? "Saving to Agent OS…"
+                : kind === "ok"
+                    ? "Saved to Agent OS"
+                    : kind === "error"
+                        ? "Agent OS save queued for retry"
+                        : (button.dataset.agentOsDefaultTitle || "Add to Agent OS");
+            if (kind === "ok" || (!kind && seriesAdded)) button.style.background = "#d8ead1";
+            else if (kind === "error") button.style.background = "#f3d0cc";
+            else if (kind === "busy") button.style.background = "#e7e5d9";
+            else button.style.background = "#fff";
+            return;
+        }
+
         if (button.dataset.agentOsCompact === "1") {
             var compactLabel = kind === "busy" ? "…" : kind === "ok" ? "✓" : kind === "error" ? "!" : "＋";
             button.textContent = compactLabel;
@@ -4465,7 +4487,113 @@
         }
     }
 
-    function goodreadsListBookCapture(link, bookId) {
+    function goodreadsSeriesIdFromUrl(urlText) {
+        try {
+            var u = new URL(urlText, location.href);
+            var m = u.pathname.match(/\/series\/(\d+)/i);
+            return m ? m[1] : "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function goodreadsNormalizeSeriesName(value) {
+        return cleanText(value)
+            .replace(/^series\s*[:\-]?\s*/i, "")
+            .replace(/\s+/g, " ")
+            .toLowerCase();
+    }
+
+    function goodreadsSeriesAliases(info) {
+        var aliases = [];
+        if (!info) return aliases;
+        if (info.id) aliases.push("id:" + String(info.id));
+        if (info.title) aliases.push("name:" + goodreadsNormalizeSeriesName(info.title));
+        return aliases.filter(function (value, index, values) {
+            return value && values.indexOf(value) === index;
+        });
+    }
+
+    function goodreadsAddedSeries() {
+        var saved = GM_getValue(GOODREADS_SERIES_KEY, {});
+        return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    }
+
+    function goodreadsSeriesIsAdded(infoOrAliases) {
+        var saved = goodreadsAddedSeries();
+        var aliases = Array.isArray(infoOrAliases)
+            ? infoOrAliases
+            : goodreadsSeriesAliases(infoOrAliases);
+        return aliases.some(function (alias) {
+            return Boolean(saved[alias]);
+        });
+    }
+
+    function goodreadsStoreAddedSeries(info) {
+        var aliases = goodreadsSeriesAliases(info);
+        if (!aliases.length) return;
+        var saved = goodreadsAddedSeries();
+        var record = {
+            id: info.id || "",
+            title: info.title || "",
+            url: info.url || "",
+            added_at: new Date().toISOString()
+        };
+        aliases.forEach(function (alias) { saved[alias] = record; });
+        GM_setValue(GOODREADS_SERIES_KEY, saved);
+        goodreadsRefreshSeriesIndicators();
+    }
+
+    function goodreadsSeriesInfoFromContainer(container, bookTitle) {
+        if (!container || !container.querySelector) return null;
+        var seriesLink = container.querySelector('a[href*="/series/"]');
+        if (seriesLink) {
+            var linkedTitle = cleanText(seriesLink.textContent);
+            return {
+                id: goodreadsSeriesIdFromUrl(seriesLink.href),
+                title: linkedTitle,
+                url: String(seriesLink.href || "")
+            };
+        }
+
+        // Older Goodreads shelf/search layouts often render the series as
+        // plain text such as "(The Expanse, #3)" next to the book title.
+        var text = cleanText(container.textContent);
+        if (bookTitle) text = text.replace(cleanText(bookTitle), " ");
+        var match = text.match(/\(([^()]{2,140}?),\s*#?\d+(?:\.\d+)?(?:\s*[-–]\s*#?\d+(?:\.\d+)?)?\)/);
+        if (!match) return null;
+        return { id: "", title: cleanText(match[1]), url: "" };
+    }
+
+    async function goodreadsResolveSeriesInfo(link, container) {
+        var local = goodreadsSeriesInfoFromContainer(container, cleanText(link && link.textContent));
+        if (local && local.id && local.url) return local;
+
+        try {
+            var response = await fetch(String(link.href || ""), {
+                credentials: "include",
+                redirect: "follow"
+            });
+            if (response.ok) {
+                var html = await response.text();
+                var doc = new DOMParser().parseFromString(html, "text/html");
+                var seriesLink = doc.querySelector('a[href*="/series/"]');
+                if (seriesLink) {
+                    var absolute = new URL(seriesLink.getAttribute("href"), response.url || link.href).toString();
+                    return {
+                        id: goodreadsSeriesIdFromUrl(absolute),
+                        title: cleanText(seriesLink.textContent) || (local && local.title) || "",
+                        url: absolute
+                    };
+                }
+            }
+        } catch (error) {
+            console.warn("[Agent OS] Could not resolve Goodreads series from book page", error);
+        }
+        return local;
+    }
+
+    function goodreadsListBookCapture(link, bookId, seriesInfo) {
         var title = cleanText(link && link.textContent);
         var container = link && link.closest
             ? link.closest(
@@ -4509,10 +4637,110 @@
             adapter: "goodreads-list-item",
             provider: "goodreads",
             book_id: bookId,
+            series_id: seriesInfo && seriesInfo.id || "",
+            series_title: seriesInfo && seriesInfo.title || "",
+            series_url: seriesInfo && seriesInfo.url || "",
             source_view_url: location.href,
             source_view_title: cleanText(document.title)
         });
         return capture;
+    }
+
+    async function goodreadsSeriesBooks(seriesInfo) {
+        if (!seriesInfo || !seriesInfo.url) return [];
+        try {
+            var response = await fetch(seriesInfo.url, {
+                credentials: "include",
+                redirect: "follow"
+            });
+            if (!response.ok) return [];
+            var html = await response.text();
+            var doc = new DOMParser().parseFromString(html, "text/html");
+            var seen = new Set();
+            var books = [];
+            doc.querySelectorAll(
+                "a.bookTitle[href*='/book/show/'], " +
+                "a.BookTitle__title[href*='/book/show/'], " +
+                "a[data-testid='bookTitle'][href*='/book/show/'], " +
+                "a[href*='/book/show/']"
+            ).forEach(function (bookLink) {
+                if (books.length >= 500) return;
+                var id = goodreadsBookIdFromUrl(bookLink.href);
+                var title = cleanText(bookLink.textContent);
+                if (!id || !title || seen.has(id)) return;
+                seen.add(id);
+                var row = bookLink.closest("tr, li, article, .elementList, [class*='BookCard'], [class*='bookRow']");
+                var authorNode = row && row.querySelector
+                    ? row.querySelector("a.authorName, a[href*='/author/show/'], [class*='ContributorLink'] a")
+                    : null;
+                books.push({
+                    book_id: id,
+                    title: title,
+                    author: cleanText(authorNode && authorNode.textContent),
+                    url: new URL(bookLink.getAttribute("href"), response.url || seriesInfo.url).toString()
+                });
+            });
+            return books;
+        } catch (error) {
+            console.warn("[Agent OS] Could not enumerate Goodreads series books", error);
+            return [];
+        }
+    }
+
+    async function goodreadsSeriesCapture(link, container) {
+        var seriesInfo = await goodreadsResolveSeriesInfo(link, container);
+        if (!seriesInfo || (!seriesInfo.id && !seriesInfo.title)) return null;
+
+        // If the first pass only recovered a series name from legacy list
+        // markup, require a real series URL before calling this a whole-series
+        // capture. A book-page fetch above normally supplies it.
+        if (!seriesInfo.url && seriesInfo.id) {
+            seriesInfo.url = "https://www.goodreads.com/series/" + seriesInfo.id;
+        }
+
+        var books = await goodreadsSeriesBooks(seriesInfo);
+        var capture = genericCapture();
+        var seriesKey = seriesInfo.id || goodreadsNormalizeSeriesName(seriesInfo.title);
+        capture.site = "goodreads";
+        capture.content_type = "book_series";
+        capture.source_id = "goodreads:series:" + seriesKey;
+        capture.title = seriesInfo.title || ("Goodreads series " + seriesKey);
+        capture.author = "";
+        capture.url = seriesInfo.url || String(link.href || "");
+        capture.canonical_url = capture.url;
+        capture.description = books.length
+            ? "Goodreads series containing " + books.length + " detected book entries."
+            : "Goodreads series captured from a listed book.";
+        capture.intent = "save";
+        capture.metadata = Object.assign({}, capture.metadata, {
+            adapter: "goodreads-series",
+            provider: "goodreads",
+            series_id: seriesInfo.id || "",
+            series_title: seriesInfo.title || "",
+            series_url: seriesInfo.url || "",
+            seed_book_id: goodreadsBookIdFromUrl(link.href),
+            seed_book_title: cleanText(link.textContent),
+            books: books,
+            book_count_detected: books.length,
+            whole_series: true,
+            source_view_url: location.href,
+            source_view_title: cleanText(document.title)
+        });
+        return { capture: capture, series: seriesInfo };
+    }
+
+    function goodreadsButtonAliases(button) {
+        return String(button && button.dataset.agentOsSeriesAliases || "")
+            .split("|")
+            .filter(Boolean);
+    }
+
+    function goodreadsRefreshSeriesIndicators() {
+        document.querySelectorAll(".agent-os-goodreads-list-add").forEach(function (button) {
+            var added = goodreadsSeriesIsAdded(goodreadsButtonAliases(button));
+            button.dataset.agentOsSeriesAdded = added ? "1" : "0";
+            if (!button.dataset.agentOsState) setButtonState(button, "", "");
+        });
     }
 
     function addGoodreadsListBookButtons() {
@@ -4528,47 +4756,83 @@
             var title = cleanText(link.textContent);
             var bookId = goodreadsBookIdFromUrl(link.href);
             if (!bookId || !title) return;
-
-            // Ignore non-title navigational links that happen to point at a
-            // book page. Goodreads' cover-image links have no text and are
-            // already excluded above.
             if (/^(ratings?|reviews?|read|more)$/i.test(title)) return;
+
+            var container = link.closest(
+                "tr, li, article, .elementList, .bookalike, .review, " +
+                "[class*='BookCard'], [class*='bookCard'], [class*='SearchResult'], [class*='bookRow']"
+            ) || link.parentElement;
+            var localSeries = goodreadsSeriesInfoFromContainer(container, title);
+            var aliases = goodreadsSeriesAliases(localSeries);
+
+            var existing = link.nextElementSibling;
+            if (existing && existing.classList && existing.classList.contains("agent-os-goodreads-list-add")) {
+                existing.dataset.agentOsSeriesAliases = aliases.join("|");
+                existing.dataset.agentOsSeriesAdded = goodreadsSeriesIsAdded(aliases) ? "1" : "0";
+                if (!existing.dataset.agentOsState) setButtonState(existing, "", "");
+                link.dataset.agentOsGoodreadsAdd = bookId;
+                return;
+            }
             if (link.dataset.agentOsGoodreadsAdd === bookId) return;
 
             var button = document.createElement("button");
             button.type = "button";
             button.className = "agent-os-goodreads-list-add";
-            button.textContent = "＋";
-            button.dataset.agentOsCompact = "1";
-            button.dataset.agentOsDefaultTitle = "Add " + title + " to Agent OS";
-            button.title = button.dataset.agentOsDefaultTitle;
+            button.dataset.agentOsGoodreadsList = "1";
+            button.dataset.agentOsSeriesAliases = aliases.join("|");
+            button.dataset.agentOsSeriesAdded = goodreadsSeriesIsAdded(aliases) ? "1" : "0";
+            button.dataset.agentOsDefaultTitle =
+                "Add " + title + " to Agent OS. Ctrl-click or Shift-click to add the entire series.";
             button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
             button.style.display = "inline-flex";
             button.style.alignItems = "center";
             button.style.justifyContent = "center";
             button.style.verticalAlign = "middle";
-            button.style.width = "22px";
             button.style.height = "22px";
-            button.style.minWidth = "22px";
+            button.style.minWidth = "46px";
             button.style.margin = "0 0 0 7px";
-            button.style.padding = "0";
+            button.style.padding = "0 6px";
             button.style.border = "1px solid rgba(0,0,0,.2)";
-            button.style.borderRadius = "50%";
-            button.style.background = "#fff";
+            button.style.borderRadius = "10px";
             button.style.color = "#382110";
-            button.style.font = "700 14px/1 system-ui, -apple-system, Segoe UI, sans-serif";
+            button.style.font = "700 11px/1 system-ui, -apple-system, Segoe UI, sans-serif";
             button.style.boxShadow = "none";
             button.style.cursor = "pointer";
+            button.style.whiteSpace = "nowrap";
+            setButtonState(button, "", "");
 
-            button.addEventListener("click", function (event) {
+            button.addEventListener("click", async function (event) {
                 event.preventDefault();
                 event.stopPropagation();
-                sendCapture(goodreadsListBookCapture(link, bookId), button);
+
+                if (event.ctrlKey || event.shiftKey || event.metaKey) {
+                    setButtonState(button, "Saving…", "busy");
+                    var resolved = await goodreadsSeriesCapture(link, container);
+                    if (!resolved) {
+                        button.dataset.agentOsState = "";
+                        setButtonState(button, "", "");
+                        window.alert(
+                            "Agent OS could not identify a Goodreads series for this book. " +
+                            "The individual book was not added."
+                        );
+                        return;
+                    }
+                    var resolvedAliases = goodreadsSeriesAliases(resolved.series);
+                    button.dataset.agentOsSeriesAliases = resolvedAliases.join("|");
+                    goodreadsStoreAddedSeries(resolved.series);
+                    sendCapture(resolved.capture, button);
+                    return;
+                }
+
+                var seriesInfo = goodreadsSeriesInfoFromContainer(container, title);
+                sendCapture(goodreadsListBookCapture(link, bookId, seriesInfo), button);
             });
 
             link.dataset.agentOsGoodreadsAdd = bookId;
             link.insertAdjacentElement("afterend", button);
         });
+
+        goodreadsRefreshSeriesIndicators();
     }
 
     function addGoodreadsBookControls() {
