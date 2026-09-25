@@ -4403,9 +4403,18 @@
     function localCreatorFollowStatus(target) {
         target = enrichCreatorTarget(target);
         var saved = followedCreatorRegistry();
-        var key = creatorTargetKey(target);
-        if (key && saved.keys[key]) {
-            return Object.assign({ followed: true, matched_by: "local_key" }, saved.keys[key]);
+        var candidateKeys = [
+            String(target.source_id || ""),
+            String(target.canonical_url || ""),
+            String(target.url || "")
+        ].filter(Boolean);
+        for (var k = 0; k < candidateKeys.length; k += 1) {
+            if (saved.keys[candidateKeys[k]]) {
+                return Object.assign(
+                    { followed: true, matched_by: "local_key" },
+                    saved.keys[candidateKeys[k]]
+                );
+            }
         }
         var aliases = creatorStrongAliases(target);
         for (var i = 0; i < aliases.length; i += 1) {
