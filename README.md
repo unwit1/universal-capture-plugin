@@ -238,3 +238,11 @@ On the Amazon cart page, an `Import Cart to Agent OS` control captures the curre
 The cart snapshot uses a stable marketplace-specific source ID, so importing the cart again updates/deduplicates the current cart record through the Agent OS bridge rather than blindly multiplying identical cart captures. Individual cart products can still be saved separately with their own per-item buttons.
 
 A Tampermonkey menu command, `Agent OS: Import Amazon cart`, provides the same cart import action when the cart page is open.
+
+## Cross-site following
+
+Version 3.13 adds first-class `follow_target` captures. Native page controls can send creators, users, individual videos, and projects to Agent OS with `intent: "follow"`, a stable source ID when the site exposes one, and provenance for where the target was discovered.
+
+Current follow adapters include YouTube creators and individual videos, Nexus Mods authors, XenForo authors (including SpaceBattles and Questionable Questing), Patreon creators, GitHub repositories/projects, Reddit users, Discord users visible in rendered UI, plus lightweight creator/publication support for Twitch, Medium, Substack, Ko-fi, and itch.io. Discord falls back to a display-name identity when the rendered UI does not expose a stable numeric user ID, and marks that lower identity confidence for downstream reconciliation.
+
+The intended Agent OS behavior is to treat these captures as durable watch definitions rather than ordinary bookmarks: resolve/deduplicate the entity, retain provenance, then let downstream follow/watch workers decide what constitutes meaningful new activity and how often to check it.
