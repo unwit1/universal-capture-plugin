@@ -34,6 +34,7 @@
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var SHEET_QUEUE_KEY = "agent_os_google_sheet_mirror_queue_v1";
     var GOODREADS_SERIES_KEY = "agent_os_goodreads_added_series_v1";
+    var FOLLOWED_CREATORS_KEY = "agent_os_followed_creators_v1";
     var MAX_QUEUE = 500;
     var SHEET_QUEUE_MAX = 5000;
 
@@ -2754,19 +2755,36 @@
         }
 
         if (button.dataset.agentOsCompact === "1") {
-            var compactLabel = kind === "busy" ? "…" : kind === "ok" ? "✓" : kind === "error" ? "!" : "＋";
+            var compactFollowed = kind === "followed" ||
+                (!kind && button.dataset.agentOsFollowed === "1");
+            var compactLabel = compactFollowed ? "✓" :
+                kind === "busy" ? "…" :
+                kind === "ok" ? "✓" :
+                kind === "error" ? "!" : "＋";
             button.textContent = compactLabel;
-            button.title = kind === "busy" ? "Saving to Agent OS…" :
-                kind === "ok" ? "Saved to Agent OS" :
-                kind === "error" ? "Agent OS save queued for retry" :
-                (button.dataset.agentOsDefaultTitle || "Follow in Agent OS");
-            if (kind === "ok") button.style.background = "rgba(35,165,89,.24)";
+            button.title = compactFollowed
+                ? (button.dataset.agentOsFollowedTitle || "Already followed in Agent OS")
+                : kind === "busy" ? "Saving to Agent OS…" :
+                    kind === "ok" ? "Saved to Agent OS" :
+                    kind === "error" ? "Agent OS save queued for retry" :
+                    (button.dataset.agentOsDefaultTitle || "Follow in Agent OS");
+            if (compactFollowed || kind === "ok") button.style.background = "rgba(35,165,89,.24)";
             else if (kind === "error") button.style.background = "rgba(242,63,67,.24)";
             else if (kind === "busy") button.style.background = "rgba(88,101,242,.22)";
             else button.style.background = "rgba(30,31,34,.88)";
             return;
         }
-        button.textContent = label;
+
+        var followed = kind === "followed" ||
+            (!kind && button.dataset.agentOsFollowed === "1");
+        if (followed) {
+            button.textContent = button.dataset.agentOsFollowedLabel || "✓ Following";
+            button.title = button.dataset.agentOsFollowedTitle || "Already followed in Agent OS";
+            button.style.background = "#2f855a";
+            return;
+        }
+
+        button.textContent = label || button.dataset.agentOsDefaultLabel || "+ Follow";
         if (kind === "ok") button.style.background = "#2f855a";
         else if (kind === "error") button.style.background = "#c53030";
         else if (kind === "busy") button.style.background = "#4a5568";
@@ -4112,10 +4130,362 @@
 
     // -- Cross-site follow targets --------------------------------------------
 
+    var followStatusMemory = new Map();
+
+    function creatorAliasNormalize(value) {
+        return String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/^@/, "")
+            .replace(/[^a-z0-9]+/g, "");
+    }
+
+    function creatorUrlAlias(site, urlText) {
+        try {
+            var u = new URL(urlText, location.href);
+            var p = u.pathname || "";
+            var patterns = {
+                youtube: [/^\/@([^/]+)/i, /^\/user\/([^/]+)/i, /^\/c\/([^/]+)/i],
+                github: [/^\/([^/]+)/i],
+                reddit: [/^\/(?:user|u)\/([^/]+)/i],
+                patreon: [/^\/(?:c\/)?([^/]+)/i],
+                twitch: [/^\/([^/]+)/i],
+                "ko-fi": [/^\/([^/]+)/i]
+            };
+            var list = patterns[String(site || "").toLowerCase()] || [];
+            for (var i = 0; i < list.length; i += 1) {
+                var m = p.match(list[i]);
+                if (m) return m[1];
+            }
+        } catch (error) {
+            return "";
+        }
+        return "";
+    }
+
+    function creatorStrongAliases(target) {
+        target = target || {};
+        var metadata = target.metadata || {};
+        var aliases = [];
+
+        function add(value) {
+            var text = cleanText(value);
+            var normalized = creatorAliasNormalize(text);
+            if (!text || !normalized) return;
+            if (!aliases.some(function (item) {
+                return creatorAliasNormalize(item) === normalized;
+            })) aliases.push(text);
+        }
+
+        var supplied = metadata.aliases || [];
+        if (typeof supplied === "string") supplied = [supplied];
+        if (Array.isArray(supplied)) {
+            supplied.forEach(function (value) {
+                add(value && typeof value === "object"
+                    ? (value.value || value.alias || value.handle)
+                    : value);
+            });
+        }
+
+        ["handle", "username", "creator_slug", "route_id", "repository_owner"].forEach(function (key) {
+            add(metadata[key]);
+        });
+        add(creatorUrlAlias(target.site, target.canonical_url || target.url));
+        return aliases;
+    }
+
+    function decodedCreatorHref(link) {
+        var href = String(link && (link.href || link.getAttribute("href")) || "");
+        if (!href) return "";
+        try {
+            var u = new URL(href, location.href);
+            if (u.hostname.indexOf("youtube.com") !== -1 && u.pathname === "/redirect") {
+                var redirected = u.searchParams.get("q") || u.searchParams.get("url");
+                if (redirected) return redirected;
+            }
+            return u.toString();
+        } catch (error) {
+            return href;
+        }
+    }
+
+    function creatorLinkKind(urlText) {
+        try {
+            var h = new URL(urlText, location.href).hostname.toLowerCase().replace(/^www\./, "");
+            if (h.indexOf("nexusmods.com") !== -1) return "nexusmods";
+            if (h === "github.com" || h.endsWith(".github.com")) return "github";
+            if (h.indexOf("youtube.com") !== -1 || h === "youtu.be") return "youtube";
+            if (h === "discord.gg" || h.indexOf("discord.com") !== -1) return "discord";
+            if (h.indexOf("patreon.com") !== -1) return "patreon";
+            if (h.indexOf("reddit.com") !== -1) return "reddit";
+            if (h === "x.com" || h.indexOf("twitter.com") !== -1) return "social";
+            if (h.indexOf("twitch.tv") !== -1) return "twitch";
+            if (h.indexOf("ko-fi.com") !== -1) return "ko-fi";
+            if (h.indexOf("linktr.ee") !== -1 || h.indexOf("carrd.co") !== -1) return "link_hub";
+            return "website";
+        } catch (error) {
+            return "website";
+        }
+    }
+
+    function collectCreatorProfileLinks() {
+        var selectors = [
+            "ytd-channel-header-renderer a[href]",
+            "yt-page-header-renderer a[href]",
+            "ytd-channel-about-metadata-renderer a[href]",
+            "#page-header a[href]",
+            "#links-container a[href]",
+            "[class*='profile'] a[href]",
+            "[class*='social'] a[href]",
+            "a[href*='github.com/']",
+            "a[href*='nexusmods.com/']",
+            "a[href*='discord.gg/']",
+            "a[href*='patreon.com/']",
+            "a[href*='ko-fi.com/']",
+            "a[href*='twitch.tv/']"
+        ];
+        var currentHost = hostname();
+        var seen = new Set();
+        var out = [];
+        document.querySelectorAll(selectors.join(",")).forEach(function (link) {
+            if (out.length >= 40) return;
+            var href = decodedCreatorHref(link);
+            if (!/^https?:\/\//i.test(href)) return;
+            try {
+                var u = new URL(href);
+                var h = u.hostname.toLowerCase().replace(/^www\./, "");
+                var sameHost = h === currentHost.replace(/^www\./, "");
+                var recognized = creatorLinkKind(href) !== "website";
+                var creatorSurface = Boolean(link.closest(
+                    "ytd-channel-header-renderer, yt-page-header-renderer, " +
+                    "ytd-channel-about-metadata-renderer, #page-header, #links-container, " +
+                    "[class*='profile'], [class*='social']"
+                ));
+                if (sameHost && !recognized) return;
+                if (!recognized && !creatorSurface) return;
+                u.hash = "";
+                var canonical = u.toString();
+                if (seen.has(canonical)) return;
+                seen.add(canonical);
+                out.push({
+                    url: canonical,
+                    kind: creatorLinkKind(canonical),
+                    label: cleanText(link.textContent || link.getAttribute("aria-label") || ""),
+                    confidence: creatorSurface ? "observed_profile_link" : "observed"
+                });
+            } catch (error) {
+                return;
+            }
+        });
+        return out;
+    }
+
+    function enrichCreatorTarget(target) {
+        target = Object.assign({}, target || {});
+        if (target.target_type !== "creator") return target;
+        target.metadata = Object.assign({}, target.metadata || {});
+
+        var aliases = creatorStrongAliases(target);
+        if (aliases.length) target.metadata.aliases = aliases;
+
+        var suppliedLinks = Array.isArray(target.metadata.profile_links)
+            ? target.metadata.profile_links.slice()
+            : [];
+        var links = suppliedLinks.concat(collectCreatorProfileLinks());
+        var seen = new Set();
+        target.metadata.profile_links = links.filter(function (item) {
+            var url = String(item && typeof item === "object" ? item.url : item || "");
+            if (!url || seen.has(url)) return false;
+            seen.add(url);
+            return true;
+        }).slice(0, 50);
+        target.metadata.identity_discovery_requested = true;
+        return target;
+    }
+
+    function followedCreatorRegistry() {
+        var saved = GM_getValue(FOLLOWED_CREATORS_KEY, {});
+        if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+            saved = {};
+        }
+        saved.keys = saved.keys && typeof saved.keys === "object" ? saved.keys : {};
+        saved.aliases = saved.aliases && typeof saved.aliases === "object" ? saved.aliases : {};
+        return saved;
+    }
+
+    function creatorTargetKey(target) {
+        target = target || {};
+        return String(target.source_id || target.canonical_url || target.url || "");
+    }
+
+    function rememberCreatorTarget(target, profile) {
+        target = enrichCreatorTarget(target);
+        var saved = followedCreatorRegistry();
+        var now = new Date().toISOString();
+        var key = creatorTargetKey(target);
+        if (key) {
+            saved.keys[key] = {
+                creator_id: profile && profile.creator_id || "",
+                display_name: profile && profile.display_name || target.author || target.title || "",
+                updated_at: now
+            };
+        }
+
+        creatorStrongAliases(target).forEach(function (alias) {
+            var normalized = creatorAliasNormalize(alias);
+            if (!normalized) return;
+            saved.aliases[normalized] = {
+                creator_id: profile && profile.creator_id || "",
+                display_name: profile && profile.display_name || target.author || target.title || alias,
+                updated_at: now
+            };
+        });
+
+        if (profile) {
+            (profile.accounts || []).forEach(function (account) {
+                var accountKey = String(account.source_id || account.canonical_url || account.url || "");
+                if (accountKey) {
+                    saved.keys[accountKey] = {
+                        creator_id: profile.creator_id || "",
+                        display_name: profile.display_name || "",
+                        updated_at: now
+                    };
+                }
+            });
+            (profile.aliases || []).forEach(function (alias) {
+                if (String(alias && alias.confidence || "") !== "high") return;
+                var normalized = creatorAliasNormalize(alias.value);
+                if (!normalized) return;
+                saved.aliases[normalized] = {
+                    creator_id: profile.creator_id || "",
+                    display_name: profile.display_name || alias.value || "",
+                    updated_at: now
+                };
+            });
+        }
+        GM_setValue(FOLLOWED_CREATORS_KEY, saved);
+    }
+
+    function localCreatorFollowStatus(target) {
+        target = enrichCreatorTarget(target);
+        var saved = followedCreatorRegistry();
+        var key = creatorTargetKey(target);
+        if (key && saved.keys[key]) {
+            return Object.assign({ followed: true, matched_by: "local_key" }, saved.keys[key]);
+        }
+        var aliases = creatorStrongAliases(target);
+        for (var i = 0; i < aliases.length; i += 1) {
+            var normalized = creatorAliasNormalize(aliases[i]);
+            if (normalized && saved.aliases[normalized]) {
+                return Object.assign({ followed: true, matched_by: "local_alias" }, saved.aliases[normalized]);
+            }
+        }
+        return { followed: false };
+    }
+
+    function bridgeFollowStatusEndpoint(settings) {
+        settings = settings || loadSettings();
+        var endpoint = String(settings.bridgeCaptureEndpoint || settings.bridgeEndpoint || "");
+        if (!endpoint) return "";
+        return endpoint
+            .replace(/\/batch(?:\?.*)?$/, "/follow/status")
+            .replace(/\/capture(?:\?.*)?$/, "/follow/status");
+    }
+
+    function markCreatorFollowed(button, status) {
+        if (!button) return;
+        button.dataset.agentOsFollowed = "1";
+        button.dataset.agentOsFollowedLabel = button.dataset.agentOsCompact === "1"
+            ? "✓"
+            : "✓ Following";
+        var name = status && (status.display_name || status.creator_id) || "";
+        button.dataset.agentOsFollowedTitle = name
+            ? "Already followed in Agent OS: " + name
+            : "Already followed in Agent OS";
+        setButtonState(button, "", "followed");
+    }
+
+    function requestCreatorFollowStatus(button, target) {
+        target = enrichCreatorTarget(target);
+        if (!target || target.target_type !== "creator") return;
+
+        var local = localCreatorFollowStatus(target);
+        if (local.followed) {
+            markCreatorFollowed(button, local);
+            return;
+        }
+
+        var settings = loadSettings();
+        if (!settings.bridgeEnabled || !settings.bridgeToken) return;
+        var endpoint = bridgeFollowStatusEndpoint(settings);
+        if (!endpoint) return;
+
+        var cacheKey = JSON.stringify([
+            target.site || "",
+            target.source_id || "",
+            creatorStrongAliases(target)
+        ]);
+        var cached = followStatusMemory.get(cacheKey);
+        if (cached && Date.now() - cached.at < 60000) {
+            if (cached.status && cached.status.followed) markCreatorFollowed(button, cached.status);
+            return;
+        }
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: endpoint,
+            headers: {
+                "Content-Type": "application/json",
+                "X-Agent-OS-Token": settings.bridgeToken
+            },
+            data: JSON.stringify(target),
+            timeout: 5000,
+            onload: function (response) {
+                if (!(response.status >= 200 && response.status < 300)) return;
+                try {
+                    var status = JSON.parse(response.responseText || "{}");
+                    followStatusMemory.set(cacheKey, { at: Date.now(), status: status });
+                    if (status.followed) {
+                        rememberCreatorTarget(target, status);
+                        markCreatorFollowed(button, status);
+                    }
+                } catch (error) {
+                    // Older bridges do not expose creator follow status yet.
+                }
+            }
+        });
+    }
+
+    function wireCreatorFollowStatus(button, targetFactory, eager) {
+        if (!button || !targetFactory) return;
+        button.__agentOsTargetFactory = targetFactory;
+
+        function check() {
+            var target = targetFactory();
+            if (target && target.target_type === "creator") {
+                requestCreatorFollowStatus(button, target);
+            }
+        }
+
+        if (eager) window.setTimeout(check, 0);
+        else button.addEventListener("mouseenter", check, { once: true });
+    }
+
+    function refreshVisibleCreatorFollowButtons() {
+        document.querySelectorAll(".agent-os-follow-target, .agent-os-discord-follow-button").forEach(function (button) {
+            if (!button.__agentOsTargetFactory) return;
+            var target = button.__agentOsTargetFactory();
+            if (target && target.target_type === "creator") {
+                requestCreatorFollowStatus(button, target);
+            }
+        });
+    }
+
     function followButton(label, title) {
         var button = document.createElement("button");
         button.type = "button";
         button.textContent = label || "+ Follow";
+        button.dataset.agentOsDefaultLabel = label || "+ Follow";
         button.className = "agent-os-follow-target";
         buttonCss(button);
         button.style.padding = "5px 8px";
@@ -4147,7 +4517,17 @@
     }
 
     function sendFollow(target, button) {
+        target = enrichCreatorTarget(target);
+        if (target && target.target_type === "creator") {
+            rememberCreatorTarget(target, null);
+            if (button) markCreatorFollowed(button, {
+                display_name: target.author || target.title || ""
+            });
+        }
         sendCapture(followCapture(target), button);
+        if (target && target.target_type === "creator") {
+            window.setTimeout(refreshVisibleCreatorFollowButtons, 500);
+        }
     }
 
     function profileIdFromHref(href, pattern) {
@@ -4166,6 +4546,7 @@
         if (host.querySelector && host.querySelector(selector)) return;
         var button = followButton(label || "+ Follow", "Follow this creator, user, video, or project in Agent OS");
         button.dataset.agentOsFollowKey = key;
+        wireCreatorFollowStatus(button, targetFactory, true);
         button.addEventListener("click", function (event) {
             event.preventDefault();
             event.stopPropagation();
@@ -4676,6 +5057,7 @@
         button.dataset.agentOsDefaultTitle = "Follow " + (name || "this Discord user") + " in Agent OS";
         button.title = button.dataset.agentOsDefaultTitle;
         button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
+        wireCreatorFollowStatus(button, targetFactory, false);
         button.addEventListener("click", function (event) {
             event.preventDefault();
             event.stopPropagation();
