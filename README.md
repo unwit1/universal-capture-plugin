@@ -45,6 +45,16 @@ By default, if no primary Agent OS endpoint is configured, captures are queued l
 See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 
+## Cross-site creator identity
+
+Creator follow controls now participate in one provider-neutral identity layer instead of acting like unrelated per-site bookmarks. When the local Agent OS bridge supports creator profiles, a creator follow creates or updates a canonical creator profile containing confirmed accounts, strong aliases/handles, observed profile links, watch-target links, cross-provider discovery queries, and provenance.
+
+The userscript captures strong account aliases and relevant external/profile links that are already visible on the page. Agent OS can use those signals to associate the same creator across YouTube, Nexus Mods, GitHub, Reddit, Patreon, Discord evidence, personal websites, and other supported surfaces. Exact account IDs/URLs are authoritative matches; unique high-confidence handle/alias matches and previously discovered profile links can associate another site with the existing creator profile.
+
+Creator buttons query the local bridge for follow status. When the current account resolves to an already-followed creator, the control changes to a green `✓ Following` state rather than offering another independent follow. Discord performs this lookup lazily on hover to avoid issuing a large burst of requests for an entire member list.
+
+Following a creator also requests deeper identity discovery. Agent OS stores search queries and desired source types for later enrichment and checks imported Discord messages for matching author aliases as identity candidates. Discord display-name matches remain candidates rather than silently becoming confirmed cross-site identities.
+
 ## YouTube creator-page follow
 
 YouTube channel/creator pages now get an `AOS + Follow` button immediately beside the rendered channel name. It supports modern handle URLs such as `/@creator` as well as `/channel/...`, legacy `/c/...`, and `/user/...` routes, including their Videos, Shorts, Playlists, Community, and other tab views.
