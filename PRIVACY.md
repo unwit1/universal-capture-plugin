@@ -70,6 +70,16 @@ Compressed Discord archives still contain private message content even though th
 The compact export deliberately omits browser/device metadata and other reconstructable fields that are not required for the durable message library. Archive-marker compaction retains only the canonical message key needed to prevent re-indexing.
 
 
+## Browser control
+
+Browser control is disabled by default. When explicitly enabled, the userscript registers the current page with the configured loopback Agent OS bridge and polls that local authenticated bridge for commands addressed to the page session.
+
+Browser-control commands and results may contain page URLs, titles, selectors, extracted rendered text, and ordinary text the user asked an agent to enter. This is private runtime data. It is stored in the Agent OS local browser-bridge database and must not be committed to this public repository.
+
+The browser executor does not expose an arbitrary JavaScript-evaluation primitive. It blocks typing into password, payment-card, one-time-code, banking, SSN, and similar sensitive fields. It also stops before recognizable consequential controls such as send/submit/publish/delete/purchase/pay/transfer/approve actions unless the command was explicitly resubmitted with consequential approval.
+
+The control path is intended for the authenticated loopback bridge only. The public repository contains protocol and executor code, not the bridge token or any browser-control session/command history.
+
 ## Browser Interaction Journal
 
 The Browser Journal is an opt-in-at-the-product-level local capture feature enabled in this distribution for the user's Agent OS workflow, with a persistent visible status indicator and Tampermonkey controls to disable journaling or exclude the current domain.
