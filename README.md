@@ -178,6 +178,14 @@ On Reddit, the same rule applies: the page-wide floating button is suppressed, a
 This makes captures unambiguous: clicking a button always saves the specific thread/post attached to that button rather than the surrounding listing/feed page.
 
 
+## Tampermonkey update shortcut
+
+A compact `↻ TM` button is pinned to the top-right of pages where the userscript runs. It opens Tampermonkey's installed-scripts dashboard so the browser extension can perform its own userscript update checks. Shift-click opens the Tampermonkey Beta dashboard.
+
+Tampermonkey does not expose a userscript API that can enumerate every installed script and silently trigger an update-all operation. The button therefore hands off to Tampermonkey's own update UI instead of imitating an unsupported update mechanism. For unattended updates, configure Tampermonkey's global userscript update interval and Automatic installation setting in the extension itself.
+
+The same action is available from the userscript menu as `Agent OS: Open Tampermonkey update manager`.
+
 ## Google Sheet mirror
 
 The userscript can mirror captures to a Google Apps Script endpoint backed by a Google Sheet while still sending the same data to the local Agent OS bridge.
