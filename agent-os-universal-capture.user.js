@@ -29,7 +29,9 @@
     var VERSION = "3.13.2";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
+    var SHEET_QUEUE_KEY = "agent_os_google_sheet_mirror_queue_v1";
     var MAX_QUEUE = 500;
+    var SHEET_QUEUE_MAX = 5000;
 
     var DEFAULT_SETTINGS = {
         endpoint: "",
@@ -45,7 +47,11 @@
         bridgeCaptureEndpoint: "http://127.0.0.1:8766/api/v1/browser/capture",
         bridgeToken: "",
         bridgeAutoCompact: true,
-        bridgeSyncSeconds: 30
+        bridgeSyncSeconds: 30,
+        sheetMirrorEnabled: true,
+        sheetEndpoint: "",
+        sheetToken: "",
+        sheetFlushSeconds: 15
     };
 
     function loadSettings() {
@@ -697,12 +703,13 @@
         pill.style.right = "20px";
         pill.style.zIndex = "2147483646";
         pill.style.border = "1px solid rgba(255,255,255,.22)";
-        pill.style.borderRadius = "8px";
-        pill.style.background = "#20242b";
+        pill.style.borderRadius = "6px";
+        pill.style.background = "rgba(30,31,34,.94)";
         pill.style.color = "#fff";
         pill.style.font = "600 12px/1.2 system-ui, -apple-system, Segoe UI, sans-serif";
-        pill.style.padding = "7px 10px";
+        pill.style.padding = "5px 8px";
         pill.style.cursor = "pointer";
+        pill.style.boxShadow = "none";
         pill.title = "Browser Journal status";
         pill.addEventListener("click", function () {
             var settings = loadSettings();
@@ -1571,8 +1578,8 @@
         pill.id = "agent-os-discord-index-status";
         pill.type = "button";
         pill.style.position = "fixed";
-        pill.style.top = "134px";
-        pill.style.right = "20px";
+        pill.style.top = "128px";
+        pill.style.right = "12px";
         pill.style.zIndex = "2147483646";
         pill.style.border = "1px solid rgba(255,255,255,.22)";
         pill.style.borderRadius = "8px";
@@ -2328,6 +2335,20 @@
             }
 
             var acknowledged = new Set(response.acknowledged.map(String));
+
+            // Mirror every durably accepted Browser Journal / Discord event to
+            // the Google Sheet outbox before compacting the browser-side copy.
+            if (sheetMirrorConfigured()) {
+                batch.events.forEach(function (event) {
+                    if (!event || !acknowledged.has(String(event.event_id || ""))) return;
+                    queueSheetMirror(
+                        sheetMirrorEventCapture(event),
+                        "bridge-event",
+                        "sheet-event:" + String(event.event_id || "")
+                    );
+                });
+            }
+
             var journalAcknowledged = new Set(
                 Array.from(acknowledged).filter(function (id) {
                     return id.indexOf("journal:") === 0;
@@ -2481,10 +2502,227 @@
         return queue.length;
     }
 
+    var sheetMirrorTimer = null;
+    var sheetMirrorInFlight = false;
+    var sheetMirrorLastStatus = { state: "idle", at: null, submitted: 0, error: "" };
+
+    function isGoogleSheetEndpoint(url) {
+        return /^https:\/\/script\.google(?:usercontent)?\.com\//i.test(String(url || ""));
+    }
+
+    function sheetMirrorEndpoint(settings) {
+        settings = settings || loadSettings();
+        if (settings.sheetEndpoint) return String(settings.sheetEndpoint).trim();
+        // Backward compatibility: older installs used the generic endpoint
+        // field for the Apps Script / Google Sheet receiver.
+        if (isGoogleSheetEndpoint(settings.endpoint)) return String(settings.endpoint).trim();
+        return "";
+    }
+
+    function sheetMirrorConfigured() {
+        var settings = loadSettings();
+        return Boolean(settings.sheetMirrorEnabled && sheetMirrorEndpoint(settings));
+    }
+
+    function primaryCaptureDestination(settings) {
+        settings = settings || loadSettings();
+        var endpoint = String(settings.endpoint || "").trim();
+        var token = settings.token || "";
+
+        // If the legacy endpoint is a Google Apps Script receiver and the
+        // local Agent OS bridge is configured, use the bridge as the primary
+        // durable Agent OS destination and keep the Apps Script URL as the
+        // independent Google Sheet mirror.
+        if ((!endpoint || isGoogleSheetEndpoint(endpoint)) &&
+                settings.bridgeEnabled && settings.bridgeToken) {
+            endpoint = settings.bridgeCaptureEndpoint ||
+                String(settings.bridgeEndpoint || "").replace(/\/batch(?:\?.*)?$/, "/capture");
+            token = settings.bridgeToken;
+        }
+        return { endpoint: endpoint, token: token };
+    }
+
+    function sheetMirrorId(payload) {
+        var source = String(payload && (payload.source_id || payload.event_id) || "");
+        var captured = String(payload && (payload.captured_at || payload.occurred_at) || "");
+        var basis = source + "|" + captured + "|" + JSON.stringify(payload || {});
+        return "sheet:" + bridgeStableHash(basis);
+    }
+
+    function queueSheetMirror(payload, reason, mirrorId) {
+        var settings = loadSettings();
+        var endpoint = sheetMirrorEndpoint(settings);
+        if (!settings.sheetMirrorEnabled || !endpoint || !payload) return 0;
+
+        var queue = GM_getValue(SHEET_QUEUE_KEY, []);
+        if (!Array.isArray(queue)) queue = [];
+        var id = String(mirrorId || sheetMirrorId(payload));
+        var item = {
+            id: id,
+            queued_at: new Date().toISOString(),
+            reason: reason || "mirror",
+            payload: payload
+        };
+        var existing = queue.findIndex(function (entry) {
+            return entry && String(entry.id || "") === id;
+        });
+        if (existing >= 0) queue[existing] = item;
+        else queue.push(item);
+        if (queue.length > SHEET_QUEUE_MAX) queue = queue.slice(queue.length - SHEET_QUEUE_MAX);
+        GM_setValue(SHEET_QUEUE_KEY, queue);
+        sheetMirrorScheduleSoon(250);
+        return queue.length;
+    }
+
+    function sheetMirrorEventCapture(event) {
+        event = event || {};
+        var payload = event.payload || {};
+        var isDiscord = event.source === "discord";
+        var url = isDiscord ? (payload.message_url || "") : (payload.url || "");
+        var text = isDiscord ? (payload.text || "") : (payload.text || payload.context || "");
+        return {
+            schema_version: "browser-capture-v1",
+            source: "browser",
+            site: isDiscord ? "discord" : "browser-journal",
+            content_type: isDiscord ? "discord_message" : "browser_journal_event",
+            source_id: event.event_id || event.source_key || "",
+            title: isDiscord
+                ? cleanText((payload.guild_name || "") + (payload.channel_name ? " / " + payload.channel_name : ""))
+                : cleanText(payload.title || ""),
+            author: isDiscord ? cleanText(payload.author || "") : "",
+            url: url,
+            canonical_url: url,
+            description: cleanText(text).slice(0, 20000),
+            selected_text: "",
+            image: "",
+            captured_at: event.occurred_at || new Date().toISOString(),
+            intent: "mirror",
+            device: event.device || loadSettings().device || "",
+            metadata: {
+                adapter: "google-sheet-mirror",
+                event_type: event.event_type || "",
+                source_key: event.source_key || "",
+                source_event: event
+            }
+        };
+    }
+
+    function sheetMirrorRequest(payload) {
+        var settings = loadSettings();
+        var endpoint = sheetMirrorEndpoint(settings);
+        return new Promise(function (resolve, reject) {
+            var headers = { "Content-Type": "application/json" };
+            if (settings.sheetToken) headers["X-Agent-OS-Token"] = settings.sheetToken;
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: endpoint,
+                headers: headers,
+                data: JSON.stringify(payload),
+                timeout: 15000,
+                onload: function (response) {
+                    if (response.status >= 200 && response.status < 300) {
+                        resolve(response);
+                    } else {
+                        reject(new Error("HTTP " + response.status));
+                    }
+                },
+                onerror: function () { reject(new Error("Google Sheet mirror unavailable")); },
+                ontimeout: function () { reject(new Error("Google Sheet mirror timeout")); }
+            });
+        });
+    }
+
+    function sheetMirrorScheduleSoon(delay) {
+        if (!sheetMirrorConfigured()) return;
+        var queue = GM_getValue(SHEET_QUEUE_KEY, []);
+        if (!Array.isArray(queue) || !queue.length) return;
+        if (sheetMirrorTimer) window.clearTimeout(sheetMirrorTimer);
+        sheetMirrorTimer = window.setTimeout(function () {
+            sheetMirrorTimer = null;
+            flushSheetMirrorQueue(false);
+        }, typeof delay === "number" ? delay : 1000);
+    }
+
+    async function flushSheetMirrorQueue(showResult) {
+        if (!sheetMirrorConfigured()) {
+            if (showResult) window.alert("Configure the Google Sheet mirror endpoint first.");
+            return { submitted: 0, remaining: (GM_getValue(SHEET_QUEUE_KEY, []) || []).length };
+        }
+        if (sheetMirrorInFlight) {
+            if (showResult) window.alert("A Google Sheet mirror sync is already running.");
+            return sheetMirrorLastStatus;
+        }
+
+        var queue = GM_getValue(SHEET_QUEUE_KEY, []);
+        if (!Array.isArray(queue) || !queue.length) {
+            if (showResult) window.alert("Google Sheet mirror is connected. Nothing is waiting to sync.");
+            return { submitted: 0, remaining: 0 };
+        }
+
+        sheetMirrorInFlight = true;
+        var batch = queue.slice(0, 25);
+        var sentIds = new Set();
+        var errorText = "";
+        try {
+            for (var i = 0; i < batch.length; i += 1) {
+                try {
+                    await sheetMirrorRequest(batch[i].payload);
+                    sentIds.add(String(batch[i].id || ""));
+                } catch (error) {
+                    errorText = String(error && error.message || error);
+                    break;
+                }
+            }
+
+            if (sentIds.size) {
+                var current = GM_getValue(SHEET_QUEUE_KEY, []);
+                if (!Array.isArray(current)) current = [];
+                current = current.filter(function (entry) {
+                    return !sentIds.has(String(entry && entry.id || ""));
+                });
+                GM_setValue(SHEET_QUEUE_KEY, current);
+            }
+
+            var remaining = (GM_getValue(SHEET_QUEUE_KEY, []) || []).length;
+            sheetMirrorLastStatus = {
+                state: errorText ? "error" : "ok",
+                at: new Date().toISOString(),
+                submitted: sentIds.size,
+                remaining: remaining,
+                error: errorText
+            };
+            if (showResult) {
+                window.alert(
+                    "Google Sheet mirror sync " + (errorText ? "paused" : "complete") + ".\n\n" +
+                    "Submitted: " + sentIds.size + "\n" +
+                    "Still queued: " + remaining +
+                    (errorText ? "\nError: " + errorText : "")
+                );
+            }
+            if (remaining && !errorText) sheetMirrorScheduleSoon(750);
+            return sheetMirrorLastStatus;
+        } finally {
+            sheetMirrorInFlight = false;
+        }
+    }
+
     function setButtonState(button, label, kind) {
         if (!button) return;
-        button.textContent = label;
         button.dataset.agentOsState = kind || "";
+        if (button.dataset.agentOsCompact === "1") {
+            var compactLabel = kind === "busy" ? "…" : kind === "ok" ? "✓" : kind === "error" ? "!" : "＋";
+            button.textContent = compactLabel;
+            button.title = kind === "busy" ? "Saving to Agent OS…" :
+                kind === "ok" ? "Saved to Agent OS" :
+                kind === "error" ? "Agent OS save queued for retry" :
+                (button.dataset.agentOsDefaultTitle || "Follow in Agent OS");
+            if (kind === "ok") button.style.background = "rgba(35,165,89,.24)";
+            else if (kind === "error") button.style.background = "rgba(242,63,67,.24)";
+            else if (kind === "busy") button.style.background = "rgba(88,101,242,.22)";
+            else button.style.background = "rgba(30,31,34,.88)";
+            return;
+        }
+        button.textContent = label;
         if (kind === "ok") button.style.background = "#2f855a";
         else if (kind === "error") button.style.background = "#c53030";
         else if (kind === "busy") button.style.background = "#4a5568";
@@ -2493,16 +2731,15 @@
 
     function sendCapture(capture, button) {
         var settings = loadSettings();
-        var endpoint = settings.endpoint || "";
-        var token = settings.token || "";
+        var destination = primaryCaptureDestination(settings);
+        var endpoint = destination.endpoint;
+        var token = destination.token;
+        var sheetEndpoint = sheetMirrorEndpoint(settings);
 
-        // Once the local bridge is configured, it is the default durable
-        // destination for manual captures unless the user explicitly set a
-        // different capture endpoint.
-        if (!endpoint && settings.bridgeEnabled && settings.bridgeToken) {
-            endpoint = settings.bridgeCaptureEndpoint ||
-                String(settings.bridgeEndpoint || "").replace(/\/batch(?:\?.*)?$/, "/capture");
-            token = settings.bridgeToken;
+        // Mirror every explicit save/follow/import capture to the configured
+        // Google Sheet independently of the primary Agent OS destination.
+        if (settings.sheetMirrorEnabled && sheetEndpoint && sheetEndpoint !== endpoint) {
+            queueSheetMirror(capture, "capture");
         }
 
         if (!endpoint) {
@@ -2642,7 +2879,13 @@
         buttonCss(button);
         button.style.position = "fixed";
         button.style.top = "90px";
-        button.style.right = "20px";
+        button.style.right = isDiscordWeb() ? "12px" : "20px";
+        if (isDiscordWeb()) {
+            button.style.padding = "7px 10px";
+            button.style.borderRadius = "6px";
+            button.style.background = "rgba(30,31,34,.94)";
+            button.style.boxShadow = "none";
+        }
         button.addEventListener("click", function (event) {
             event.preventDefault();
             event.stopPropagation();
@@ -3920,26 +4163,93 @@
         });
     }
 
+    function ensureDiscordFollowStyles() {
+        if (!isDiscordWeb() || document.getElementById("agent-os-discord-follow-styles")) return;
+        var style = document.createElement("style");
+        style.id = "agent-os-discord-follow-styles";
+        style.textContent =
+            ".agent-os-discord-follow-row{position:relative!important;}" +
+            ".agent-os-discord-follow-slot{position:absolute;right:6px;top:50%;transform:translateY(-50%);" +
+            "z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;}" +
+            ".agent-os-discord-follow-button{width:24px;height:24px;min-width:24px;padding:0;margin:0;" +
+            "display:inline-flex;align-items:center;justify-content:center;border-radius:6px;" +
+            "border:1px solid rgba(255,255,255,.12);background:rgba(30,31,34,.88);color:#dbdee1;" +
+            "font:600 14px/1 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:none;cursor:pointer;" +
+            "opacity:0;transform:scale(.96);transition:opacity .12s ease,transform .12s ease,background .12s ease;" +
+            "pointer-events:auto;}" +
+            ".agent-os-discord-follow-row:hover>.agent-os-discord-follow-slot .agent-os-discord-follow-button," +
+            ".agent-os-discord-follow-button:focus-visible," +
+            ".agent-os-discord-follow-button[data-agent-os-state='busy']," +
+            ".agent-os-discord-follow-button[data-agent-os-state='ok']," +
+            ".agent-os-discord-follow-button[data-agent-os-state='error']{opacity:.96;transform:scale(1);}" +
+            ".agent-os-discord-follow-button:hover{background:rgba(49,51,56,.98);border-color:rgba(255,255,255,.2);}";
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    function discordMemberDisplayName(row) {
+        if (!row || !row.querySelectorAll) return "";
+        var candidates = row.querySelectorAll(
+            '[class*="name"], [class*="username"], [class*="nick"]'
+        );
+        for (var i = 0; i < candidates.length; i += 1) {
+            var node = candidates[i];
+            if (node.closest && node.closest(".agent-os-discord-follow-slot")) continue;
+            var value = cleanText(node.textContent);
+            if (value && value !== "Online" && value !== "Offline") return value;
+        }
+        return cleanText(row.getAttribute && row.getAttribute("aria-label"));
+    }
+
     function addDiscordUserFollowButtons() {
         if (!isDiscordWeb()) return;
-        document.querySelectorAll(
-            '[class*="message"] [class*="username"], [class*="member"] [class*="name"], ' +
-            '[class*="userPopout"] [class*="nickname"], [class*="userPopout"] [class*="username"]'
-        ).forEach(function (node) {
-            if (!node || !cleanText(node.textContent)) return;
-            var name = cleanText(node.textContent);
-            var container = node.closest('[data-list-item-id], [id^="chat-messages-"], [class*="userPopout"], [class*="member"]') || node.parentElement;
-            if (!container) return;
-            var rawId = cleanText(container.getAttribute && (container.getAttribute("data-list-item-id") || container.id));
-            var idMatch = rawId.match(/(\d{15,22})/);
-            var userId = idMatch ? idMatch[1] : "";
+        ensureDiscordFollowStyles();
+
+        // Discord's member rows carry a stable data-list-item-id. Target the
+        // row once instead of every descendant whose hashed class contains
+        // "name"; the old descendant selector caused duplicate + Follow
+        // controls every time Discord rerendered the member list.
+        document.querySelectorAll('[data-list-item-id^="members-"]').forEach(function (row) {
+            if (!row || !row.querySelector) return;
+            var rawId = cleanText(row.getAttribute("data-list-item-id") || row.id);
+            var idMatches = rawId.match(/\d{15,22}/g) || [];
+            var userId = idMatches.length ? idMatches[idMatches.length - 1] : "";
+            var name = discordMemberDisplayName(row);
+            if (!name && !userId) return;
+
             var key = userId || name.toLowerCase();
-            addFollowButtonOnce(node.parentElement || node, "discord-user:" + key, function () {
-                return {
+            var followKey = "discord-user:" + key;
+            var existingSlots = row.querySelectorAll(".agent-os-discord-follow-slot");
+            var existing = existingSlots.length ? existingSlots[0] : null;
+
+            // Remove any duplicates left behind by an older userscript build.
+            for (var i = 1; i < existingSlots.length; i += 1) existingSlots[i].remove();
+            if (existing && existing.dataset.agentOsFollowKey === followKey) {
+                row.classList.add("agent-os-discord-follow-row");
+                return;
+            }
+            if (existing) existing.remove();
+
+            row.classList.add("agent-os-discord-follow-row");
+            var slot = document.createElement("span");
+            slot.className = "agent-os-discord-follow-slot";
+            slot.dataset.agentOsFollowKey = followKey;
+
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "agent-os-discord-follow-button";
+            button.textContent = "＋";
+            button.dataset.agentOsCompact = "1";
+            button.dataset.agentOsDefaultTitle = "Follow " + (name || "this Discord user") + " in Agent OS";
+            button.title = button.dataset.agentOsDefaultTitle;
+            button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                sendFollow({
                     site: "discord",
                     target_type: "creator",
                     source_id: "discord:user:" + key,
-                    title: name,
+                    title: name || "Discord user",
                     author: name,
                     url: location.href,
                     metadata: {
@@ -3949,8 +4259,10 @@
                         identity_confidence: userId ? "stable-id" : "display-name-only",
                         context_url: location.href
                     }
-                };
-            }, "+ Follow");
+                }, button);
+            });
+            slot.appendChild(button);
+            row.appendChild(slot);
         });
     }
 
@@ -4095,13 +4407,62 @@
     function configureEndpoint() {
         var settings = loadSettings();
         var endpoint = window.prompt(
-            "Agent OS capture endpoint. Leave blank to queue captures locally.\n\nExamples:\nhttp://127.0.0.1:PORT/api/v1/browser/capture\nhttps://script.google.com/macros/s/.../exec",
+            "Agent OS primary capture endpoint. Leave blank to use the configured local bridge or queue captures locally.\n\nA Google Apps Script URL entered here is treated as the Google Sheet mirror whenever the local bridge is configured.",
             settings.endpoint || ""
         );
         if (endpoint === null) return;
         settings.endpoint = endpoint.trim();
         saveSettings(settings);
-        window.alert(settings.endpoint ? "Agent OS endpoint saved." : "Endpoint cleared. Captures will queue locally.");
+        window.alert(settings.endpoint ? "Agent OS endpoint saved." : "Endpoint cleared.");
+    }
+
+    function configureSheetMirror() {
+        var settings = loadSettings();
+        var endpoint = window.prompt(
+            "Google Sheet mirror Apps Script endpoint. Every explicit capture plus durably accepted Browser Journal / Discord event will be mirrored here.\n\nExample:\nhttps://script.google.com/macros/s/.../exec",
+            sheetMirrorEndpoint(settings)
+        );
+        if (endpoint === null) return;
+        settings.sheetEndpoint = endpoint.trim();
+
+        var token = window.prompt(
+            "Optional Google Sheet mirror token. Leave blank when the Apps Script endpoint does not require one.",
+            settings.sheetToken || ""
+        );
+        if (token === null) return;
+        settings.sheetToken = token.trim();
+        settings.sheetMirrorEnabled = Boolean(settings.sheetEndpoint || isGoogleSheetEndpoint(settings.endpoint));
+        saveSettings(settings);
+        sheetMirrorScheduleSoon(200);
+        window.alert(
+            settings.sheetMirrorEnabled
+                ? "Google Sheet mirror configured and enabled."
+                : "Google Sheet mirror endpoint cleared."
+        );
+    }
+
+    function toggleSheetMirror() {
+        var settings = loadSettings();
+        settings.sheetMirrorEnabled = !settings.sheetMirrorEnabled;
+        saveSettings(settings);
+        if (settings.sheetMirrorEnabled) sheetMirrorScheduleSoon(200);
+        window.alert("Google Sheet mirror is now " + (settings.sheetMirrorEnabled ? "ON." : "OFF."));
+    }
+
+    function showSheetMirrorStatus() {
+        var settings = loadSettings();
+        var queue = GM_getValue(SHEET_QUEUE_KEY, []);
+        if (!Array.isArray(queue)) queue = [];
+        window.alert(
+            "Agent OS Google Sheet Mirror\n\n" +
+            "Enabled: " + (settings.sheetMirrorEnabled ? "YES" : "NO") + "\n" +
+            "Configured: " + (sheetMirrorConfigured() ? "YES" : "NO") + "\n" +
+            "Endpoint: " + (sheetMirrorEndpoint(settings) || "(none)") + "\n" +
+            "Queued: " + queue.length + "\n" +
+            "Last state: " + sheetMirrorLastStatus.state + "\n" +
+            "Last sync: " + (sheetMirrorLastStatus.at || "(none)") +
+            (sheetMirrorLastStatus.error ? "\nError: " + sheetMirrorLastStatus.error : "")
+        );
     }
 
     function configureToken() {
@@ -4214,6 +4575,10 @@
         GM_registerMenuCommand("Agent OS: Configure endpoint", configureEndpoint);
         GM_registerMenuCommand("Agent OS: Configure device token", configureToken);
         GM_registerMenuCommand("Agent OS: Set device label", configureDevice);
+        GM_registerMenuCommand("Agent OS: Configure Google Sheet mirror", configureSheetMirror);
+        GM_registerMenuCommand("Agent OS: Google Sheet mirror ON/OFF", toggleSheetMirror);
+        GM_registerMenuCommand("Agent OS: Sync Google Sheet mirror now", function () { flushSheetMirrorQueue(true); });
+        GM_registerMenuCommand("Agent OS: Google Sheet mirror status", showSheetMirrorStatus);
         GM_registerMenuCommand("Agent OS: Retry queued captures", retryQueue);
         GM_registerMenuCommand("Agent OS: Copy queued captures as JSON", exportQueue);
         GM_registerMenuCommand("Agent OS: Clear queued captures", clearQueue);
@@ -4242,6 +4607,7 @@
     addFloatingButton();
     initializeBrowserJournal();
     initializeBridgeSync();
+    sheetMirrorScheduleSoon(1500);
     addNexusCardButtons();
     addXenforoThreadButtons();
     addRedditPostButtons();
@@ -4302,6 +4668,9 @@
         browser_journal: loadSettings().browserJournalEnabled,
         browser_journal_domain_excluded: journalDomainExcluded(hostname()),
         bridge_enabled: loadSettings().bridgeEnabled,
-        bridge_configured: bridgeConfigured()
+        bridge_configured: bridgeConfigured(),
+        sheet_mirror_enabled: loadSettings().sheetMirrorEnabled,
+        sheet_mirror_configured: sheetMirrorConfigured(),
+        sheet_mirror_queued: (GM_getValue(SHEET_QUEUE_KEY, []) || []).length
     });
 })();
