@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.13.15
+// @version      3.13.16
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -27,7 +27,7 @@
 (function () {
     "use strict";
 
-    var VERSION = "3.13.15";
+    var VERSION = "3.13.16";
     var AGENT_OS_USERSCRIPT_URL =
         "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
