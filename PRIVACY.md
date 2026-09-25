@@ -30,11 +30,11 @@ Do not commit:
 
 ## Runtime behavior
 
-The userscript does not automatically upload browsing history.
+The userscript does not send browser data to an undeclared service. Runtime destinations must be explicitly configured in Tampermonkey storage.
 
-A capture is created when the user invokes the Agent OS save action. If no endpoint is configured, the capture is queued in Tampermonkey storage on that browser.
+A capture is created when the user invokes an Agent OS save/follow/import action. If no primary Agent OS endpoint is configured, the Agent OS copy is queued in Tampermonkey storage on that browser.
 
-When an endpoint is configured, the userscript sends the capture only to that configured endpoint. The endpoint and optional token are stored in Tampermonkey storage and are not part of the published source.
+The userscript can also maintain a separately configured Google Sheet mirror through a Google Apps Script endpoint. When that mirror is enabled, explicit captures are copied to its persistent retry queue. Browser Journal and Discord records are added to the same mirror queue only after the local Agent OS bridge has durably acknowledged those records. The Google Sheet endpoint and optional mirror token are stored only in Tampermonkey storage and are not part of the published source.
 
 Tampermonkey may fetch the raw GitHub userscript URL to check for updates.
 
@@ -87,7 +87,7 @@ Users should use the per-domain exclusion control for sites whose content they d
 
 ## Local bridge transport
 
-When explicitly configured, the userscript sends Browser Journal and Discord staging records only to the configured bridge endpoint. The intended/default endpoint is loopback (`127.0.0.1`) and the bridge token remains in Tampermonkey storage.
+When explicitly configured, the userscript sends Browser Journal and Discord staging records to the configured local bridge endpoint. The intended/default endpoint is loopback (`127.0.0.1`) and the bridge token remains in Tampermonkey storage. If the user separately enables the Google Sheet mirror, records durably acknowledged by the bridge are then copied into the mirror retry queue for delivery to that configured Google Apps Script endpoint.
 
 The userscript does not delete or compact staging records merely because a request was sent. It requires a successful response that explicitly reports `durable: true` and lists acknowledged event IDs. Failed or ambiguous requests leave local records intact.
 
@@ -100,4 +100,4 @@ The public repository contains bridge protocol code only. It does not contain th
 
 Amazon cart import records only product/cart information rendered in the active cart view. It is not a checkout automation feature and does not attempt to read payment-card fields, saved payment methods, account passwords, or checkout credentials.
 
-A cart snapshot can contain shopping-sensitive information such as product names, quantities, observed prices, sellers, variations, and subtotal. These records are treated as private runtime data and are sent only through the configured Agent OS capture/bridge path or retained in the local queue when no endpoint is available.
+A cart snapshot can contain shopping-sensitive information such as product names, quantities, observed prices, sellers, variations, and subtotal. These records are treated as private runtime data and are sent through the configured Agent OS capture/bridge path; when the user has enabled the Google Sheet mirror, the same capture is also queued for that configured mirror endpoint.
