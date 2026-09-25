@@ -3002,10 +3002,9 @@
         var button = document.createElement("button");
         button.id = "agent-os-tampermonkey-update";
         button.type = "button";
-        button.textContent = "↻ TM";
-        button.setAttribute("aria-label", "Open Tampermonkey update manager");
-        button.title =
-            "Show Tampermonkey update instructions and an Update AOS shortcut.";
+        button.textContent = "AOS ↻";
+        button.setAttribute("aria-label", "Update Agent OS userscript");
+        button.title = "Open the latest Agent OS userscript for Tampermonkey to update/reinstall.";
         buttonCss(button);
         button.style.position = "fixed";
         button.style.top = "12px";
@@ -3019,7 +3018,7 @@
         button.addEventListener("click", function (event) {
             event.preventDefault();
             event.stopPropagation();
-            openTampermonkeyUpdateManager();
+            openAgentOsUserscriptUpdate();
         });
         document.body.appendChild(button);
         return button;
