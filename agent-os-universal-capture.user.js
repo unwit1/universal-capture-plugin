@@ -2716,6 +2716,25 @@
         if (!button) return;
         button.dataset.agentOsState = kind || "";
 
+        if (button.dataset.agentOsYoutubeAdd === "1") {
+            if (kind === "busy") button.textContent = "AOS …";
+            else if (kind === "ok") button.textContent = "AOS ✓";
+            else if (kind === "error") button.textContent = "AOS !";
+            else button.textContent = "AOS +";
+            button.title = kind === "busy"
+                ? "Saving YouTube video to Agent OS…"
+                : kind === "ok"
+                    ? "Saved to Agent OS"
+                    : kind === "error"
+                        ? "Agent OS save queued for retry"
+                        : (button.dataset.agentOsDefaultTitle || "Add this YouTube video to Agent OS");
+            if (kind === "ok") button.style.background = "rgba(42,157,67,.16)";
+            else if (kind === "error") button.style.background = "rgba(255,0,0,.12)";
+            else if (kind === "busy") button.style.background = "rgba(128,128,128,.14)";
+            else button.style.background = "transparent";
+            return;
+        }
+
         if (button.dataset.agentOsGoodreadsList === "1") {
             var seriesAdded = button.dataset.agentOsSeriesAdded === "1";
             if (kind === "busy") button.textContent = "AOS …";
@@ -4098,24 +4117,149 @@
         host.appendChild(button);
     }
 
+    function youtubeVideoIdFromUrl(urlText) {
+        try {
+            var u = new URL(urlText, location.href);
+            if (u.hostname === "youtu.be") return u.pathname.split("/").filter(Boolean)[0] || "";
+            if (u.hostname.indexOf("youtube.com") === -1) return "";
+            if (u.pathname === "/watch") return u.searchParams.get("v") || "";
+            var shorts = u.pathname.match(/^\/shorts\/([^/?#]+)/i);
+            if (shorts) return shorts[1];
+            return "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function youtubeVideoTarget(link, videoId, container) {
+        container = container || (link && link.closest && link.closest(
+            "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, " +
+            "ytd-playlist-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer"
+        )) || (link && link.parentElement);
+
+        var channelNode = container && container.querySelector
+            ? container.querySelector(
+                "ytd-channel-name a, #channel-name a, #text.ytd-channel-name, " +
+                "a.yt-simple-endpoint.yt-formatted-string[href*='/@'], " +
+                "a.yt-simple-endpoint.yt-formatted-string[href*='/channel/']"
+            )
+            : null;
+        var thumb = container && container.querySelector
+            ? container.querySelector("img[src], yt-image img")
+            : null;
+
+        var title = cleanText(link && (
+            link.getAttribute("title") ||
+            link.getAttribute("aria-label") ||
+            link.textContent
+        ));
+
+        return {
+            site: "youtube",
+            target_type: "video",
+            source_id: "youtube:video:" + videoId,
+            title: title || "YouTube video",
+            author: cleanText(channelNode && channelNode.textContent),
+            url: "https://www.youtube.com/watch?v=" + videoId,
+            metadata: {
+                provider: "youtube",
+                video_id: videoId,
+                thumbnail: String(thumb && (thumb.currentSrc || thumb.src) || ""),
+                source_view_url: location.href,
+                source_view_title: cleanText(document.title)
+            }
+        };
+    }
+
+    function makeYouTubeAddButton(targetFactory) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "agent-os-youtube-video-add";
+        button.dataset.agentOsYoutubeAdd = "1";
+        button.dataset.agentOsDefaultTitle = "Add this YouTube video to Agent OS";
+        button.setAttribute("aria-label", button.dataset.agentOsDefaultTitle);
+        button.style.display = "inline-flex";
+        button.style.alignItems = "center";
+        button.style.justifyContent = "center";
+        button.style.verticalAlign = "middle";
+        button.style.height = "22px";
+        button.style.minWidth = "46px";
+        button.style.margin = "0 0 0 7px";
+        button.style.padding = "0 6px";
+        button.style.border = "1px solid rgba(255,255,255,.22)";
+        button.style.borderRadius = "11px";
+        button.style.color = "inherit";
+        button.style.font = "700 11px/1 system-ui, -apple-system, Segoe UI, sans-serif";
+        button.style.boxShadow = "none";
+        button.style.cursor = "pointer";
+        button.style.whiteSpace = "nowrap";
+        setButtonState(button, "", "");
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var target = targetFactory();
+            if (target) sendFollow(target, button);
+        });
+        return button;
+    }
+
+    function addYouTubeVideoTitleButtons() {
+        if (hostname().indexOf("youtube.com") === -1) return;
+
+        document.querySelectorAll(
+            "a#video-title[href*='/watch'], " +
+            "a#video-title-link[href*='/watch'], " +
+            "a.yt-lockup-metadata-view-model__title[href*='/watch'], " +
+            "h3 a[href*='/watch?v='], " +
+            "a[href*='/shorts/'][title]"
+        ).forEach(function (link) {
+            if (!link || !link.parentElement) return;
+            var videoId = youtubeVideoIdFromUrl(link.href);
+            var title = cleanText(link.getAttribute("title") || link.textContent);
+            if (!videoId || !title) return;
+
+            var parent = link.parentElement;
+            var existing = parent.querySelector(
+                '.agent-os-youtube-video-add[data-agent-os-video-id="' + videoId.replace(/"/g, "") + '"]'
+            );
+            if (existing) return;
+
+            var button = makeYouTubeAddButton(function () {
+                return youtubeVideoTarget(link, videoId);
+            });
+            button.dataset.agentOsVideoId = videoId;
+            button.dataset.agentOsDefaultTitle = "Add “" + title + "” to Agent OS";
+            button.title = button.dataset.agentOsDefaultTitle;
+            link.insertAdjacentElement("afterend", button);
+        });
+
+        // Current watch-page title.
+        var currentVideoId = youtubeVideoId();
+        var currentTitle = document.querySelector("h1.ytd-watch-metadata, h1.title");
+        if (currentVideoId && currentTitle && !document.getElementById("agent-os-youtube-current-video-add")) {
+            var currentButton = makeYouTubeAddButton(function () {
+                var currentLink = {
+                    href: "https://www.youtube.com/watch?v=" + currentVideoId,
+                    textContent: cleanText(currentTitle.textContent),
+                    getAttribute: function (name) {
+                        return name === "title" ? cleanText(currentTitle.textContent) : "";
+                    }
+                };
+                return youtubeVideoTarget(currentLink, currentVideoId, document.querySelector("ytd-watch-metadata"));
+            });
+            currentButton.id = "agent-os-youtube-current-video-add";
+            currentButton.dataset.agentOsVideoId = currentVideoId;
+            currentButton.dataset.agentOsDefaultTitle = "Add this YouTube video to Agent OS";
+            currentButton.title = currentButton.dataset.agentOsDefaultTitle;
+            currentTitle.style.display = "inline";
+            currentTitle.insertAdjacentElement("afterend", currentButton);
+        }
+    }
+
     function addYouTubeFollowButtons() {
         if (hostname().indexOf("youtube.com") === -1 && hostname() !== "youtu.be") return;
 
-        var videoId = youtubeVideoId();
-        if (videoId) {
-            var videoHost = document.querySelector("#title.ytd-watch-metadata, #above-the-fold #title, ytd-watch-metadata h1");
-            if (videoHost) addFollowButtonOnce(videoHost, "youtube-video:" + videoId, function () {
-                return {
-                    site: "youtube",
-                    target_type: "video",
-                    source_id: "youtube:video:" + videoId,
-                    title: cleanText((document.querySelector("h1.ytd-watch-metadata, h1.title") || {}).textContent || document.title),
-                    author: cleanText((document.querySelector("ytd-channel-name a, #owner-name a") || {}).textContent),
-                    url: "https://www.youtube.com/watch?v=" + videoId,
-                    metadata: { video_id: videoId, provider: "youtube" }
-                };
-            }, "+ Follow video");
-        }
+        addYouTubeVideoTitleButtons();
 
         var channelLink = document.querySelector(
             "#owner ytd-channel-name a[href], ytd-watch-metadata ytd-channel-name a[href], " +
