@@ -53,6 +53,8 @@
         bridgeToken: "",
         bridgeAutoCompact: true,
         bridgeSyncSeconds: 30,
+        browserControlEnabled: false,
+        browserControlPollSeconds: 1.5,
         sheetMirrorEnabled: true,
         sheetEndpoint: "",
         sheetToken: "",
@@ -2477,6 +2479,499 @@
             bridgeSyncNow(false);
         }, seconds * 1000);
         bridgeScheduleSoon(2500);
+    }
+
+
+    // -- Browser control prototype -------------------------------------------
+
+    var browserControlSessionId = "";
+    var browserControlPollTimer = null;
+    var browserControlHeartbeatTimer = null;
+    var browserControlInFlight = false;
+    var browserControlLastStatus = {
+        state: "idle",
+        at: null,
+        command_id: "",
+        error: ""
+    };
+
+    function browserControlConfigured() {
+        var settings = loadSettings();
+        return Boolean(
+            settings.browserControlEnabled &&
+            settings.bridgeEnabled &&
+            settings.bridgeToken &&
+            (settings.bridgeEndpoint || settings.bridgeCaptureEndpoint)
+        );
+    }
+
+    function browserControlBase(settings) {
+        settings = settings || loadSettings();
+        var endpoint = String(
+            settings.bridgeEndpoint ||
+            settings.bridgeCaptureEndpoint ||
+            ""
+        ).trim();
+        return endpoint
+            .replace(/\/api\/v1\/browser\/(?:batch|capture)(?:\?.*)?$/i, "")
+            .replace(/\/$/, "");
+    }
+
+    function browserControlEndpoint(path) {
+        var base = browserControlBase(loadSettings());
+        return base ? base + path : "";
+    }
+
+    function ensureBrowserControlSessionId() {
+        if (browserControlSessionId) return browserControlSessionId;
+        var storageKey = "agent_os_browser_control_session_v1";
+        try {
+            browserControlSessionId = String(sessionStorage.getItem(storageKey) || "");
+            if (!browserControlSessionId) {
+                var random = window.crypto && typeof window.crypto.randomUUID === "function"
+                    ? window.crypto.randomUUID()
+                    : bridgeStableHash(Date.now() + "|" + Math.random() + "|" + location.href);
+                browserControlSessionId = "browser-" + random;
+                sessionStorage.setItem(storageKey, browserControlSessionId);
+            }
+        } catch (error) {
+            browserControlSessionId = "browser-" + bridgeStableHash(
+                Date.now() + "|" + Math.random() + "|" + location.href
+            );
+        }
+        return browserControlSessionId;
+    }
+
+    function browserControlRequest(method, path, payload) {
+        var settings = loadSettings();
+        var url = browserControlEndpoint(path);
+        return new Promise(function (resolve, reject) {
+            if (!url || !settings.bridgeToken) {
+                reject(new Error("Agent OS browser control bridge is not configured"));
+                return;
+            }
+            var request = {
+                method: method,
+                url: url,
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Agent-OS-Token": settings.bridgeToken
+                },
+                timeout: 10000,
+                onload: function (response) {
+                    if (!(response.status >= 200 && response.status < 300)) {
+                        reject(new Error("HTTP " + response.status));
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(response.responseText || "{}"));
+                    } catch (error) {
+                        resolve({});
+                    }
+                },
+                onerror: function () { reject(new Error("Agent OS browser control bridge unavailable")); },
+                ontimeout: function () { reject(new Error("Agent OS browser control bridge timeout")); }
+            };
+            if (payload !== undefined && payload !== null) {
+                request.data = JSON.stringify(payload);
+            }
+            GM_xmlhttpRequest(request);
+        });
+    }
+
+    function browserControlSessionPayload() {
+        return {
+            session_id: ensureBrowserControlSessionId(),
+            url: location.href,
+            title: cleanText(document.title),
+            site: hostname(),
+            visibility: document.visibilityState || "",
+            focused: Boolean(document.hasFocus && document.hasFocus()),
+            user_agent: navigator.userAgent || "",
+            capabilities: {
+                protocol: "agent-os/browser-control/v1",
+                userscript_version: VERSION,
+                ops: [
+                    "inspect", "extract", "wait", "click", "type", "scroll",
+                    "navigate", "back", "forward", "reload", "open_tab"
+                ],
+                sensitive_fields: "blocked",
+                consequential_clicks: "approval_required"
+            }
+        };
+    }
+
+    function registerBrowserControlSession() {
+        if (!browserControlConfigured()) return Promise.resolve(null);
+        return browserControlRequest(
+            "POST",
+            "/api/v1/browser/session/heartbeat",
+            browserControlSessionPayload()
+        ).then(function (result) {
+            browserControlLastStatus.state = "ready";
+            browserControlLastStatus.at = new Date().toISOString();
+            browserControlLastStatus.error = "";
+            return result;
+        }).catch(function (error) {
+            browserControlLastStatus.state = "error";
+            browserControlLastStatus.at = new Date().toISOString();
+            browserControlLastStatus.error = String(error && error.message || error);
+            return null;
+        });
+    }
+
+    function browserControlElement(selector) {
+        selector = String(selector || "").trim();
+        if (!selector) throw new Error("selector is required");
+        var node;
+        try {
+            node = document.querySelector(selector);
+        } catch (error) {
+            throw new Error("invalid selector: " + selector);
+        }
+        if (!node) throw new Error("element not found: " + selector);
+        return node;
+    }
+
+    function browserControlElementSummary(node) {
+        if (!node) return null;
+        var rect = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+        return {
+            tag: String(node.tagName || "").toLowerCase(),
+            id: String(node.id || ""),
+            name: String(node.getAttribute && node.getAttribute("name") || ""),
+            role: String(node.getAttribute && node.getAttribute("role") || ""),
+            text: cleanText(node.innerText || node.textContent || "").slice(0, 4000),
+            aria_label: String(node.getAttribute && node.getAttribute("aria-label") || ""),
+            href: String(node.href || ""),
+            visible: Boolean(
+                !rect ||
+                (rect.width > 0 && rect.height > 0)
+            )
+        };
+    }
+
+    function browserControlSensitiveInput(node) {
+        if (!node || !node.matches || !node.matches("input, textarea, [contenteditable='true']")) return false;
+        var type = String(node.getAttribute("type") || "").toLowerCase();
+        var autocomplete = String(node.getAttribute("autocomplete") || "").toLowerCase();
+        var identity = [
+            node.id,
+            node.getAttribute("name"),
+            node.getAttribute("aria-label"),
+            node.getAttribute("placeholder"),
+            autocomplete
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        if (type === "password") return true;
+        if (/cc-|one-time-code|current-password|new-password/.test(autocomplete)) return true;
+        return /\b(password|passcode|otp|security code|card number|credit card|debit card|cvv|cvc|ssn|social security|routing number|bank account)\b/i.test(identity);
+    }
+
+    function browserControlRiskyClick(node) {
+        if (!node) return "";
+        if (node.matches && node.matches(
+            "input[type='password'], input[autocomplete*='cc-'], input[autocomplete='one-time-code']"
+        )) {
+            return "sensitive authentication/payment control";
+        }
+
+        var text = cleanText(
+            (node.innerText || node.textContent || "") + " " +
+            (node.getAttribute && node.getAttribute("aria-label") || "") + " " +
+            (node.getAttribute && node.getAttribute("title") || "") + " " +
+            (node.getAttribute && node.getAttribute("value") || "")
+        );
+        var risky = /\b(send|submit|post|publish|delete|remove account|purchase|buy now|checkout|pay|place order|confirm order|transfer|withdraw|book now|reserve|authorize|approve|accept offer|hire|reject applicant)\b/i;
+        if (risky.test(text)) return text.slice(0, 240) || "consequential control";
+
+        var form = node.closest && node.closest("form");
+        if (form && form.querySelector && form.querySelector(
+            "input[type='password'], input[autocomplete*='cc-'], input[autocomplete='one-time-code']"
+        )) {
+            return "form contains authentication/payment fields";
+        }
+        return "";
+    }
+
+    function browserControlSetValue(node, value) {
+        if (browserControlSensitiveInput(node)) {
+            throw new Error("typing into password, payment, security-code, or similar sensitive fields is blocked");
+        }
+        node.focus();
+        if ("value" in node) {
+            var proto = node instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+            var descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+            if (descriptor && descriptor.set) descriptor.set.call(node, value);
+            else node.value = value;
+        } else {
+            node.textContent = value;
+        }
+        node.dispatchEvent(new Event("input", { bubbles: true }));
+        node.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function browserControlWaitFor(selector, timeoutMs) {
+        timeoutMs = Math.max(0, Math.min(Number(timeoutMs || 5000), 15000));
+        return new Promise(function (resolve, reject) {
+            var started = Date.now();
+            function check() {
+                var node = null;
+                try { node = document.querySelector(selector); } catch (error) {
+                    reject(new Error("invalid selector: " + selector));
+                    return;
+                }
+                if (node) {
+                    resolve(browserControlElementSummary(node));
+                    return;
+                }
+                if (Date.now() - started >= timeoutMs) {
+                    reject(new Error("wait timed out: " + selector));
+                    return;
+                }
+                window.setTimeout(check, 100);
+            }
+            check();
+        });
+    }
+
+    async function executeBrowserControlAction(action, approvedConsequential, effects) {
+        action = action || {};
+        var op = String(action.op || "");
+
+        if (op === "inspect") {
+            var root = action.selector ? browserControlElement(action.selector) : document.body;
+            return {
+                url: location.href,
+                title: cleanText(document.title),
+                site: hostname(),
+                visibility: document.visibilityState || "",
+                focused: Boolean(document.hasFocus && document.hasFocus()),
+                element: browserControlElementSummary(root),
+                text: cleanText(root && (root.innerText || root.textContent) || "").slice(0, 20000)
+            };
+        }
+
+        if (op === "extract") {
+            var selector = String(action.selector || "").trim();
+            if (!selector) throw new Error("extract requires selector");
+            var nodes;
+            try { nodes = Array.from(document.querySelectorAll(selector)).slice(0, 50); }
+            catch (error) { throw new Error("invalid selector: " + selector); }
+            var attribute = String(action.attribute || "");
+            return {
+                selector: selector,
+                count: nodes.length,
+                values: nodes.map(function (node) {
+                    if (attribute) return String(node.getAttribute && node.getAttribute(attribute) || "");
+                    return browserControlElementSummary(node);
+                })
+            };
+        }
+
+        if (op === "wait") {
+            return browserControlWaitFor(String(action.selector || ""), action.timeout_ms);
+        }
+
+        if (op === "click") {
+            var clickNode = browserControlElement(action.selector);
+            var risk = browserControlRiskyClick(clickNode);
+            if (risk && !approvedConsequential) {
+                var approvalError = new Error("approval required before clicking: " + risk);
+                approvalError.agentOsApprovalRequired = true;
+                approvalError.agentOsRisk = risk;
+                throw approvalError;
+            }
+            clickNode.scrollIntoView({ block: "center", inline: "center" });
+            clickNode.click();
+            return { clicked: browserControlElementSummary(clickNode), risk: risk || null };
+        }
+
+        if (op === "type") {
+            var input = browserControlElement(action.selector);
+            browserControlSetValue(input, String(action.text || ""));
+            return {
+                typed: true,
+                element: browserControlElementSummary(input),
+                characters: String(action.text || "").length
+            };
+        }
+
+        if (op === "scroll") {
+            if (action.selector) {
+                var scrollNode = browserControlElement(action.selector);
+                scrollNode.scrollIntoView({ behavior: "auto", block: "center", inline: "center" });
+                return { scrolled_to: browserControlElementSummary(scrollNode) };
+            }
+            var dx = Number(action.x || 0);
+            var dy = Number(action.y || 0);
+            window.scrollBy(dx, dy);
+            return { x: window.scrollX, y: window.scrollY };
+        }
+
+        if (op === "open_tab") {
+            var opened = GM_openInTab(String(action.url || ""), {
+                active: action.active !== false,
+                insert: true,
+                setParent: true
+            });
+            return { opened: true, url: String(action.url || ""), handle: Boolean(opened) };
+        }
+
+        if (op === "navigate") {
+            effects.navigation = { kind: "navigate", url: String(action.url || "") };
+            return { navigation_scheduled: effects.navigation };
+        }
+
+        if (op === "back" || op === "forward" || op === "reload") {
+            effects.navigation = { kind: op };
+            return { navigation_scheduled: effects.navigation };
+        }
+
+        throw new Error("unsupported browser action: " + op);
+    }
+
+    async function executeBrowserControlCommand(command) {
+        var results = [];
+        var effects = {};
+        var actions = Array.isArray(command.actions) ? command.actions : [];
+        try {
+            for (var i = 0; i < actions.length; i += 1) {
+                var op = String(actions[i] && actions[i].op || "");
+                if (effects.navigation && i < actions.length) {
+                    throw new Error("navigate/back/forward/reload must be the final action in a command");
+                }
+                results.push(await executeBrowserControlAction(
+                    actions[i],
+                    Boolean(command.approved_consequential),
+                    effects
+                ));
+            }
+            return {
+                state: "completed",
+                result: {
+                    session_id: ensureBrowserControlSessionId(),
+                    url: location.href,
+                    title: cleanText(document.title),
+                    actions: results
+                },
+                effects: effects
+            };
+        } catch (error) {
+            return {
+                state: error && error.agentOsApprovalRequired ? "approval_required" : "failed",
+                result: error && error.agentOsApprovalRequired ? {
+                    risk: error.agentOsRisk || "",
+                    message: String(error.message || error)
+                } : null,
+                error: String(error && error.message || error),
+                effects: {}
+            };
+        }
+    }
+
+    function applyBrowserControlEffects(effects) {
+        var nav = effects && effects.navigation;
+        if (!nav) return;
+        window.setTimeout(function () {
+            if (nav.kind === "navigate") location.assign(nav.url);
+            else if (nav.kind === "back") history.back();
+            else if (nav.kind === "forward") history.forward();
+            else if (nav.kind === "reload") location.reload();
+        }, 100);
+    }
+
+    function postBrowserControlResult(commandId, outcome) {
+        return browserControlRequest("POST", "/api/v1/browser/command-result", {
+            command_id: commandId,
+            state: outcome.state,
+            result: outcome.result,
+            error: outcome.error || ""
+        }).then(function () {
+            applyBrowserControlEffects(outcome.effects);
+        });
+    }
+
+    function pollBrowserControlCommands() {
+        if (!browserControlConfigured() || browserControlInFlight) return;
+        browserControlInFlight = true;
+        var sessionId = ensureBrowserControlSessionId();
+        browserControlRequest(
+            "GET",
+            "/api/v1/browser/commands?session_id=" + encodeURIComponent(sessionId)
+        ).then(async function (payload) {
+            var commands = payload && Array.isArray(payload.commands) ? payload.commands : [];
+            for (var i = 0; i < commands.length; i += 1) {
+                var command = commands[i];
+                browserControlLastStatus.state = "running";
+                browserControlLastStatus.command_id = String(command.command_id || "");
+                browserControlLastStatus.at = new Date().toISOString();
+                var outcome = await executeBrowserControlCommand(command);
+                await postBrowserControlResult(command.command_id, outcome);
+                browserControlLastStatus.state = outcome.state;
+                browserControlLastStatus.at = new Date().toISOString();
+                browserControlLastStatus.error = outcome.error || "";
+            }
+        }).catch(function (error) {
+            browserControlLastStatus.state = "error";
+            browserControlLastStatus.at = new Date().toISOString();
+            browserControlLastStatus.error = String(error && error.message || error);
+        }).finally(function () {
+            browserControlInFlight = false;
+        });
+    }
+
+    function initializeBrowserControl() {
+        if (browserControlPollTimer) window.clearInterval(browserControlPollTimer);
+        if (browserControlHeartbeatTimer) window.clearInterval(browserControlHeartbeatTimer);
+        browserControlPollTimer = null;
+        browserControlHeartbeatTimer = null;
+        if (!browserControlConfigured()) return;
+
+        registerBrowserControlSession();
+        pollBrowserControlCommands();
+
+        var pollSeconds = Math.max(0.75, Number(loadSettings().browserControlPollSeconds || 1.5));
+        browserControlPollTimer = window.setInterval(
+            pollBrowserControlCommands,
+            pollSeconds * 1000
+        );
+        browserControlHeartbeatTimer = window.setInterval(
+            registerBrowserControlSession,
+            5000
+        );
+    }
+
+    function toggleBrowserControl() {
+        var settings = loadSettings();
+        settings.browserControlEnabled = !settings.browserControlEnabled;
+        saveSettings(settings);
+        initializeBrowserControl();
+        window.alert(
+            "Agent OS browser control is now " +
+            (settings.browserControlEnabled ? "ON." : "OFF.") +
+            (settings.browserControlEnabled
+                ? "\n\nThis tab can now receive bounded commands from your local Agent OS bridge."
+                : "")
+        );
+    }
+
+    function showBrowserControlStatus() {
+        var settings = loadSettings();
+        window.alert(
+            "Agent OS Browser Control\n\n" +
+            "Enabled: " + (settings.browserControlEnabled ? "YES" : "NO") + "\n" +
+            "Bridge configured: " + (browserControlConfigured() ? "YES" : "NO") + "\n" +
+            "Session: " + (browserControlSessionId || "(not registered)") + "\n" +
+            "URL: " + location.href + "\n" +
+            "Last state: " + browserControlLastStatus.state + "\n" +
+            "Last command: " + (browserControlLastStatus.command_id || "(none)") +
+            (browserControlLastStatus.error
+                ? "\nError: " + browserControlLastStatus.error
+                : "")
+        );
     }
 
 
@@ -5984,6 +6479,8 @@
         GM_registerMenuCommand("Agent OS: Local bridge ON/OFF", toggleLocalBridge);
         GM_registerMenuCommand("Agent OS: Sync local bridge now", function () { bridgeSyncNow(true); });
         GM_registerMenuCommand("Agent OS: Local bridge status", showBridgeStatus);
+        GM_registerMenuCommand("Agent OS: Browser control ON/OFF", toggleBrowserControl);
+        GM_registerMenuCommand("Agent OS: Browser control status", showBrowserControlStatus);
         GM_registerMenuCommand("Agent OS: Browser Journal ON/OFF", toggleBrowserJournal);
         GM_registerMenuCommand("Agent OS: Browser Journal include/exclude this domain", toggleJournalCurrentDomainExclusion);
         GM_registerMenuCommand("Agent OS: Browser Journal export range", function () { exportBrowserJournalPrompt(); });
@@ -6005,6 +6502,7 @@
     addFloatingButton();
     initializeBrowserJournal();
     initializeBridgeSync();
+    initializeBrowserControl();
     sheetMirrorScheduleSoon(1500);
     addNexusCardButtons();
     addXenforoThreadButtons();
@@ -6068,6 +6566,8 @@
         browser_journal_domain_excluded: journalDomainExcluded(hostname()),
         bridge_enabled: loadSettings().bridgeEnabled,
         bridge_configured: bridgeConfigured(),
+        browser_control_enabled: loadSettings().browserControlEnabled,
+        browser_control_session: browserControlSessionId || undefined,
         sheet_mirror_enabled: loadSettings().sheetMirrorEnabled,
         sheet_mirror_configured: sheetMirrorConfigured(),
         sheet_mirror_queued: (GM_getValue(SHEET_QUEUE_KEY, []) || []).length
