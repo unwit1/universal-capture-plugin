@@ -40,10 +40,14 @@ It must never contain:
 
 The userscript stores its configured endpoint, device token, device label, and offline queue in Tampermonkey's per-browser storage. Those values are not committed here.
 
-By default, if no endpoint is configured, captures are queued locally. The script has no analytics or telemetry service of its own.
+By default, if no primary Agent OS endpoint is configured, captures are queued locally. A separately configured Google Sheet mirror can receive the same captures as a redundant activity log. The script has no analytics or telemetry service of its own.
 
 See [PRIVACY.md](PRIVACY.md) for the audit model.
 
+
+## Discord member-list controls
+
+Discord's member list uses one compact Agent OS control per member row. The control is hidden until hover/focus, does not add row height, and is keyed to Discord's stable member-row ID when available. Repeated Discord SPA rerenders reuse or replace that one control instead of injecting duplicate `+ Follow` buttons into usernames, messages, activities, or member rows.
 
 ## Discord passive indexing
 
@@ -171,6 +175,23 @@ On Reddit, the same rule applies: the page-wide floating button is suppressed, a
 
 This makes captures unambiguous: clicking a button always saves the specific thread/post attached to that button rather than the surrounding listing/feed page.
 
+
+## Google Sheet mirror
+
+The userscript can mirror captures to a Google Apps Script endpoint backed by a Google Sheet while still sending the same data to the local Agent OS bridge.
+
+Use the Tampermonkey menu commands:
+
+- `Agent OS: Configure Google Sheet mirror`
+- `Agent OS: Google Sheet mirror ON/OFF`
+- `Agent OS: Sync Google Sheet mirror now`
+- `Agent OS: Google Sheet mirror status`
+
+The mirror is an independent outbox. Explicit page/post/thread/story/cart/follow captures are queued for the Sheet as soon as they are submitted. Browser Journal and Discord records that the local bridge durably acknowledges are also copied into the Sheet mirror outbox before browser-side compaction, so the Sheet can act as a secondary log without replacing Agent OS as the primary durable store.
+
+Older installs that already use a `https://script.google.com/macros/s/.../exec` URL in the generic capture-endpoint setting remain compatible. When the local bridge is configured, that Apps Script URL is automatically treated as the Sheet mirror and the local bridge becomes the primary Agent OS capture destination.
+
+Sheet endpoint URLs and optional tokens stay in Tampermonkey storage and are never committed to this public repository. Failed Sheet writes remain queued for retry instead of blocking or discarding the Agent OS capture.
 
 ## Local Agent OS bridge
 
