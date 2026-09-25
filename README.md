@@ -171,6 +171,27 @@ The direct Discord message URL can always be reconstructed from guild/channel/me
 After a successfully verified export, local archive markers are now reduced to essentially `{key}` only. Existing verbose markers are automatically rewritten into the smaller representation when the local IndexedDB schema upgrades to v3.
 
 
+## Agent OS browser-control prototype
+
+The userscript can optionally act as a bounded browser-side executor for the local Agent OS bridge. Browser control is **OFF by default** and must be enabled from the Tampermonkey menu with `Agent OS: Browser control ON/OFF`.
+
+When enabled, each open page registers a short-lived browser session with the loopback bridge and polls for commands addressed to that session. The current prototype supports:
+
+- page inspection and bounded text extraction;
+- waiting for a CSS selector;
+- clicking ordinary rendered controls;
+- typing into ordinary non-sensitive fields;
+- scrolling;
+- HTTP/HTTPS navigation;
+- history back/forward and reload;
+- opening a new tab with Tampermonkey.
+
+The executor intentionally does not provide arbitrary JavaScript execution. Password, payment-card, one-time-code, banking, SSN, and similar sensitive input fields are blocked. Clicks whose rendered control looks like a consequential action such as sending, submitting, publishing, deleting, purchasing, paying, transferring, or approving are returned as `approval_required` unless the caller explicitly resubmits the command after human approval.
+
+The local bridge exposes live sessions and a durable command queue. Agent-facing clients use provider-neutral MCP tools such as `browser.sessions`, `browser.execute`, and `browser.command_status`; the userscript remains only the Firefox/Tampermonkey executor.
+
+Because a userscript controls web-page DOM rather than Firefox chrome, this prototype does not automate Firefox settings, extension-management pages, native permission prompts, or arbitrary browser-profile UI. A future Firefox WebExtension can reuse the same Agent OS command protocol for those browser-level capabilities.
+
 ## Browser Interaction Journal
 
 The userscript now includes a local-first Browser Journal for building future Agent OS context from ordinary browsing activity.
