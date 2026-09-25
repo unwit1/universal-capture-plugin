@@ -4987,10 +4987,39 @@
             "[data-testid='profile-name'], main h1"
         );
         var displayName = cleanText(nameNode && nameNode.textContent) || username;
+        var repositories = [];
+        var seenRepos = new Set();
+        document.querySelectorAll(
+            "a[itemprop='codeRepository'][href], " +
+            ".pinned-item-list-item a[href], " +
+            "a[href^='/" + CSS.escape(username) + "/']"
+        ).forEach(function (link) {
+            if (repositories.length >= 50) return;
+            try {
+                var u = new URL(link.href, location.href);
+                var parts = u.pathname.split("/").filter(Boolean);
+                if (parts.length !== 2 || parts[0].toLowerCase() !== username.toLowerCase()) return;
+                if (/^(followers|following|repositories|projects|packages|stars)$/i.test(parts[1])) return;
+                u.search = "";
+                u.hash = "";
+                var url = u.toString().replace(/\/$/, "");
+                if (seenRepos.has(url)) return;
+                seenRepos.add(url);
+                repositories.push({
+                    url: url,
+                    kind: "github_repository",
+                    label: cleanText(link.textContent) || parts[1],
+                    confidence: "observed_profile_repository"
+                });
+            } catch (error) {
+                return;
+            }
+        });
         return {
             username: username,
             display_name: displayName,
             url: "https://github.com/" + username,
+            repositories: repositories,
             host: (nameNode && nameNode.parentElement) || nameNode || document.querySelector("main")
         };
     }
@@ -5011,7 +5040,8 @@
                         provider: "github",
                         username: creator.username,
                         repository_owner: creator.username,
-                        aliases: [creator.username]
+                        aliases: [creator.username],
+                        profile_links: creator.repositories || []
                     }
                 };
             }, "AOS + Follow");
