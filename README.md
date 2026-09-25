@@ -45,6 +45,12 @@ By default, if no primary Agent OS endpoint is configured, captures are queued l
 See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 
+## YouTube creator-page follow
+
+YouTube channel/creator pages now get an `AOS + Follow` button immediately beside the rendered channel name. It supports modern handle URLs such as `/@creator` as well as `/channel/...`, legacy `/c/...`, and `/user/...` routes, including their Videos, Shorts, Playlists, Community, and other tab views.
+
+The follow record prefers YouTube's stable channel ID when the page exposes it and otherwise falls back to the creator route/handle. This keeps creator follows distinct from individual video captures while using the same Agent OS and Google Sheet mirror paths.
+
 ## YouTube video-title capture
 
 YouTube video titles now get a compact `AOS +` button immediately to their right on supported rendered list surfaces such as Home, search results, subscriptions/recommendations, compact/sidebar videos, and playlist-style rows. The current watch-page title also gets the same control.
