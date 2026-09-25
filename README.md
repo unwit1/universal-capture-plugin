@@ -198,13 +198,13 @@ This makes captures unambiguous: clicking a button always saves the specific thr
 
 ## Tampermonkey update shortcut
 
-A compact `↻ TM` button is pinned to the top-right of pages where the userscript runs. On Chromium browsers it opens Tampermonkey's installed-scripts dashboard so the browser extension can perform its own userscript update checks; Shift-click targets Tampermonkey Beta.
+A compact `↻ TM` button is pinned to the top-right of pages where the userscript runs. It no longer attempts to navigate to any private `chrome-extension://` or `moz-extension://` URL, because those extension-internal addresses are browser/install-specific and are not reliably reachable from a userscript.
 
-Firefox uses a per-install `moz-extension://` UUID and does not expose that private dashboard URL to userscripts. On Firefox, the button therefore shows the exact Tampermonkey UI path instead of trying to open Chrome's `chrome-extension://` URL: Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates.
+Clicking the button opens a small in-page Agent OS panel with the exact Tampermonkey path for checking every installed userscript: Tampermonkey toolbar icon → Dashboard → Utilities → Check for userscript updates. The panel also provides an **Update AOS** shortcut that opens the public Agent OS userscript URL, which lets Tampermonkey update/reinstall this userscript directly.
 
 Tampermonkey does not expose a userscript API that can enumerate every installed script and silently trigger an update-all operation. For unattended updates, configure Tampermonkey's global userscript update interval and Automatic installation setting in the extension itself.
 
-The same action is available from the userscript menu as `Agent OS: Open Tampermonkey update manager`.
+The same actions are available from the userscript menu as `Agent OS: Tampermonkey update help` and `Agent OS: Update this userscript`.
 
 ## Google Sheet mirror
 
