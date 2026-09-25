@@ -47,9 +47,13 @@ See [PRIVACY.md](PRIVACY.md) for the audit model.
 
 ## Goodreads list capture
 
-Goodreads list-style surfaces—including shelves, search/results pages, and rendered recommendation/list cards—get a compact circular `+` immediately to the right of each detected book title. Clicking it saves that specific book to Agent OS using its Goodreads book ID, title, nearby author, book URL, cover image when available, and the source list/page where it was found. The same capture also uses the configured Google Sheet mirror.
+Goodreads list-style surfaces—including shelves, search/results pages, and rendered recommendation/list cards—get a compact `AOS +` button immediately to the right of each detected book title. A normal click saves that specific book to Agent OS using its Goodreads book ID, title, nearby author, book URL, cover image when available, and the source list/page where it was found. The same capture also uses the configured Google Sheet mirror.
 
-The control is idempotent across Goodreads dynamic rerenders, so rescanning the page does not stack duplicate buttons beside the same title.
+Hold **Ctrl** or **Shift** while clicking `AOS +` to add the **entire Goodreads series** instead of only that book. The userscript resolves the series from the rendered row or book page, captures the Goodreads series as a series-level Agent OS item, and when possible enumerates the books shown on the Goodreads series page into the capture metadata. Meta/Command-click is accepted as the same shortcut on platforms that use it.
+
+Whole-series additions are remembered in Tampermonkey storage. Other rendered books known to belong to that series change from `AOS +` to `AOS S✓`, including books identified from the captured series membership even when a list row does not expose a series link. A normal click on an `AOS S✓` button can still save that individual book separately.
+
+The controls are idempotent across Goodreads dynamic rerenders, so rescanning the page does not stack duplicate buttons beside the same title.
 
 ## Discord follow controls
 
