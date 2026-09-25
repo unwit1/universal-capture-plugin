@@ -15,6 +15,7 @@
 // @grant        GM_listValues
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_openInTab
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setClipboard
 // @connect      127.0.0.1
@@ -27,6 +28,10 @@
     "use strict";
 
     var VERSION = "3.13.4";
+    var TAMPERMONKEY_STABLE_DASHBOARD =
+        "chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=dashboard";
+    var TAMPERMONKEY_BETA_DASHBOARD =
+        "chrome-extension://gcalenpjmijncebpfijmoaglllgpjagf/options.html#nav=dashboard";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
     var QUEUE_KEY = "agent_os_capture_queue_v1";
     var SHEET_QUEUE_KEY = "agent_os_google_sheet_mirror_queue_v1";
@@ -2858,6 +2863,51 @@
         return true;
     }
 
+    function openTampermonkeyUpdateManager(useBeta) {
+        var url = useBeta ? TAMPERMONKEY_BETA_DASHBOARD : TAMPERMONKEY_STABLE_DASHBOARD;
+        try {
+            GM_openInTab(url, { active: true, insert: true, setParent: true });
+        } catch (error) {
+            console.warn("[Agent OS] Could not open Tampermonkey dashboard", error);
+            window.alert(
+                "Tampermonkey's dashboard could not be opened from this page.\n\n" +
+                "Open the Tampermonkey extension, then choose Utilities → Check for userscript updates."
+            );
+        }
+    }
+
+    function ensureTampermonkeyUpdateButton() {
+        if (!document.body) return null;
+        var existing = document.getElementById("agent-os-tampermonkey-update");
+        if (existing) return existing;
+
+        var button = document.createElement("button");
+        button.id = "agent-os-tampermonkey-update";
+        button.type = "button";
+        button.textContent = "↻ TM";
+        button.setAttribute("aria-label", "Open Tampermonkey update manager");
+        button.title =
+            "Open Tampermonkey update manager. Tampermonkey itself must check/install updates for all scripts. " +
+            "Shift-click for Tampermonkey Beta.";
+        buttonCss(button);
+        button.style.position = "fixed";
+        button.style.top = "12px";
+        button.style.right = "12px";
+        button.style.padding = "6px 9px";
+        button.style.borderRadius = "6px";
+        button.style.background = "rgba(30,31,34,.94)";
+        button.style.boxShadow = "none";
+        button.style.fontSize = "12px";
+        button.style.lineHeight = "1";
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            openTampermonkeyUpdateManager(Boolean(event.shiftKey));
+        });
+        document.body.appendChild(button);
+        return button;
+    }
+
     function addFloatingButton() {
         var existing = document.getElementById("agent-os-universal-save");
 
@@ -4657,6 +4707,9 @@
 
     function registerMenus() {
         GM_registerMenuCommand("Agent OS: Save current page", function () { saveCurrent(null); });
+        GM_registerMenuCommand("Agent OS: Open Tampermonkey update manager", function () {
+            openTampermonkeyUpdateManager(false);
+        });
         GM_registerMenuCommand("Agent OS: Configure endpoint", configureEndpoint);
         GM_registerMenuCommand("Agent OS: Configure device token", configureToken);
         GM_registerMenuCommand("Agent OS: Set device label", configureDevice);
@@ -4689,6 +4742,7 @@
 
     ensureDiscordIndexingDefault();
     registerMenus();
+    ensureTampermonkeyUpdateButton();
     addFloatingButton();
     initializeBrowserJournal();
     initializeBridgeSync();
@@ -4730,6 +4784,7 @@
         scheduled = true;
         window.setTimeout(function () {
             scheduled = false;
+            ensureTampermonkeyUpdateButton();
             addFloatingButton();
             addNexusCardButtons();
             addXenforoThreadButtons();
