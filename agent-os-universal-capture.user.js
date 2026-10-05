@@ -27,6 +27,16 @@
 (function () {
     "use strict";
 
+    // The Agent OS Firefox extension bundles this script and defines
+    // __AGENT_OS_EXTENSION__. A separately installed Tampermonkey copy stands
+    // down when the extension is present so nothing is captured twice.
+    var IN_EXTENSION = typeof __AGENT_OS_EXTENSION__ !== "undefined";
+    if (!IN_EXTENSION && document.documentElement &&
+            document.documentElement.hasAttribute("data-agent-os-extension")) {
+        console.info("[Agent OS] Firefox extension is active; userscript copy standing down.");
+        return;
+    }
+
     var VERSION = "3.13.20";
     var AGENT_OS_USERSCRIPT_URL =
         "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js";
@@ -2496,6 +2506,8 @@
     };
 
     function browserControlConfigured() {
+        // Inside the extension, the background page owns bridge sessions.
+        if (IN_EXTENSION) return false;
         var settings = loadSettings();
         return Boolean(
             settings.browserControlEnabled &&
@@ -3520,7 +3532,8 @@
     }
 
     function ensureTampermonkeyUpdateButton() {
-        if (!document.body) return null;
+        // The extension updates itself; the Tampermonkey updater does not apply.
+        if (IN_EXTENSION || !document.body) return null;
         var existing = document.getElementById("agent-os-tampermonkey-update");
         if (existing) return existing;
 
@@ -6463,7 +6476,7 @@
         GM_registerMenuCommand("Agent OS: Tampermonkey update help", function () {
             openTampermonkeyUpdateManager();
         });
-        GM_registerMenuCommand("Agent OS: Update this userscript", openAgentOsUserscriptUpdate);
+        if (!IN_EXTENSION) GM_registerMenuCommand("Agent OS: Update this userscript", openAgentOsUserscriptUpdate);
         GM_registerMenuCommand("Agent OS: Configure endpoint", configureEndpoint);
         GM_registerMenuCommand("Agent OS: Configure device token", configureToken);
         GM_registerMenuCommand("Agent OS: Set device label", configureDevice);
@@ -6479,8 +6492,10 @@
         GM_registerMenuCommand("Agent OS: Local bridge ON/OFF", toggleLocalBridge);
         GM_registerMenuCommand("Agent OS: Sync local bridge now", function () { bridgeSyncNow(true); });
         GM_registerMenuCommand("Agent OS: Local bridge status", showBridgeStatus);
-        GM_registerMenuCommand("Agent OS: Browser control ON/OFF", toggleBrowserControl);
-        GM_registerMenuCommand("Agent OS: Browser control status", showBrowserControlStatus);
+        if (!IN_EXTENSION) {
+            GM_registerMenuCommand("Agent OS: Browser control ON/OFF", toggleBrowserControl);
+            GM_registerMenuCommand("Agent OS: Browser control status", showBrowserControlStatus);
+        }
         GM_registerMenuCommand("Agent OS: Browser Journal ON/OFF", toggleBrowserJournal);
         GM_registerMenuCommand("Agent OS: Browser Journal include/exclude this domain", toggleJournalCurrentDomainExclusion);
         GM_registerMenuCommand("Agent OS: Browser Journal export range", function () { exportBrowserJournalPrompt(); });
