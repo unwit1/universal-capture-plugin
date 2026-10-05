@@ -3,9 +3,9 @@
     "agent-os@unwit1.local": {
       "updates": [
         {
-          "version": "1.0.3",
-          "update_link": "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/firefox/agent-os-firefox-1.0.3.xpi",
-          "update_hash": "sha256:08414abbe7829696b8363264b1867cbcbdfef2a91a9afb7b883af29ee86fe48f",
+          "version": "1.0.4",
+          "update_link": "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/firefox/agent-os-firefox-1.0.4.xpi",
+          "update_hash": "sha256:cce46ad0e07d51e5b952c4d6795a0646b0656a2290a47044ca2167a764402a04",
           "applications": {
             "gecko": {
               "strict_min_version": "140.0"
