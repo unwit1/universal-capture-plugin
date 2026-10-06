@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.13.21
+// @version      3.13.22
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -37,7 +37,7 @@
         return;
     }
 
-    var VERSION = "3.13.21";
+    var VERSION = "3.13.22";
     var AGENT_OS_USERSCRIPT_URL =
         "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
@@ -47,6 +47,8 @@
     var FOLLOWED_CREATORS_KEY = "agent_os_followed_creators_v1";
     var MAX_QUEUE = 500;
     var SHEET_QUEUE_MAX = 5000;
+    var SAVED_KEY = "agent_os_saved_captures_v1";
+    var SAVED_MAX = 20000;
 
     var DEFAULT_SETTINGS = {
         endpoint: "",
@@ -277,7 +279,7 @@
         if (!info) return null;
 
         var h1 = document.querySelector("h1");
-        var authorLink = document.querySelector('a[href*="/users/"]');
+        var authorLink = document.querySelector('a[href*="/users/"], a[href*="/profile/"]');
         var version = "";
         document.querySelectorAll("dt, .label, .stat").forEach(function (node) {
             if (version) return;
@@ -3061,10 +3063,38 @@
         return "sheet:" + bridgeStableHash(basis);
     }
 
+    // Spreadsheet tab for a mirrored row. The Apps Script receiver
+    // (browser/apps-script/agent-os-intake.gs) creates missing tabs.
+    function sheetTabFor(payload) {
+        payload = payload || {};
+        var type = String(payload.content_type || "").toLowerCase();
+        var url = String(payload.canonical_url || payload.url || "");
+        var host = "";
+        try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch (error) { host = ""; }
+        function on(domain) { return host === domain || host.slice(-(domain.length + 1)) === "." + domain; }
+        if (type === "discord_message") return "Discord";
+        if (type === "browser_journal_event") return "Browser Journal";
+        if (payload.intent === "follow" || type === "creator") return "Follows";
+        if (type === "nexus_mod") return "Mod Intake";
+        if (on("nexusmods.com")) return /\/collections\//.test(url) ? "Collections" : "Mod Intake";
+        if (on("steamcommunity.com") && /sharedfiles|workshop/i.test(url)) return "Steam Workshop";
+        if (type.indexOf("youtube") === 0 || on("youtube.com") || host === "youtu.be") return "YouTube";
+        if (type.indexOf("reddit") === 0 || on("reddit.com")) return "Reddit";
+        if (type === "fiction_story" || on("archiveofourown.org") || on("fanfiction.net") ||
+                on("fiction.live") || on("royalroad.com")) return "Stories";
+        if (on("spacebattles.com") || on("sufficientvelocity.com") || on("questionablequesting.com") ||
+                on("alternatehistory.com") || type.indexOf("thread") !== -1) return "Forum Threads";
+        if (type === "product" || /(^|\.)amazon\./.test(host)) return "Products";
+        if (on("github.com")) return "GitHub";
+        if (on("goodreads.com")) return "Books";
+        return "Links";
+    }
+
     function queueSheetMirror(payload, reason, mirrorId) {
         var settings = loadSettings();
         var endpoint = sheetMirrorEndpoint(settings);
         if (!settings.sheetMirrorEnabled || !endpoint || !payload) return 0;
+        if (!payload.sheet_tab) payload = Object.assign({}, payload, { sheet_tab: sheetTabFor(payload) });
 
         var queue = GM_getValue(SHEET_QUEUE_KEY, []);
         if (!Array.isArray(queue)) queue = [];
@@ -3223,8 +3253,9 @@
         button.dataset.agentOsState = kind || "";
 
         if (button.dataset.agentOsYoutubeAdd === "1") {
+            var videoSaved = !kind && button.dataset.agentOsSaved === "1";
             if (kind === "busy") button.textContent = "AOS …";
-            else if (kind === "ok") button.textContent = "AOS ✓";
+            else if (kind === "ok" || videoSaved) button.textContent = "AOS ✓";
             else if (kind === "error") button.textContent = "AOS !";
             else button.textContent = "AOS +";
             button.title = kind === "busy"
@@ -3233,8 +3264,9 @@
                     ? "Saved to Agent OS"
                     : kind === "error"
                         ? "Agent OS save queued for retry"
-                        : (button.dataset.agentOsDefaultTitle || "Add this YouTube video to Agent OS");
-            if (kind === "ok") button.style.background = "rgba(42,157,67,.16)";
+                        : videoSaved ? "Already saved to Agent OS"
+                            : (button.dataset.agentOsDefaultTitle || "Add this YouTube video to Agent OS");
+            if (kind === "ok" || videoSaved) button.style.background = "rgba(42,157,67,.16)";
             else if (kind === "error") button.style.background = "rgba(255,0,0,.12)";
             else if (kind === "busy") button.style.background = "rgba(128,128,128,.14)";
             else button.style.background = "transparent";
@@ -3243,10 +3275,11 @@
 
         if (button.dataset.agentOsGoodreadsList === "1") {
             var seriesAdded = button.dataset.agentOsSeriesAdded === "1";
+            var itemSaved = !kind && button.dataset.agentOsSaved === "1";
             if (kind === "busy") button.textContent = "AOS …";
             else if (kind === "ok") button.textContent = "AOS ✓";
             else if (kind === "error") button.textContent = "AOS !";
-            else button.textContent = seriesAdded ? "AOS S✓" : "AOS +";
+            else button.textContent = seriesAdded ? "AOS S✓" : itemSaved ? "AOS ✓" : "AOS +";
             button.title = kind === "busy"
                 ? "Saving to Agent OS…"
                 : kind === "ok"
@@ -3254,7 +3287,7 @@
                     : kind === "error"
                         ? "Agent OS save queued for retry"
                         : (button.dataset.agentOsDefaultTitle || "Add to Agent OS");
-            if (kind === "ok" || (!kind && seriesAdded)) button.style.background = "#d8ead1";
+            if (kind === "ok" || (!kind && (seriesAdded || itemSaved))) button.style.background = "#d8ead1";
             else if (kind === "error") button.style.background = "#f3d0cc";
             else if (kind === "busy") button.style.background = "#e7e5d9";
             else button.style.background = "#fff";
@@ -3263,14 +3296,15 @@
 
         if (button.dataset.agentOsCompact === "1") {
             var compactFollowed = kind === "followed" ||
-                (!kind && button.dataset.agentOsFollowed === "1");
+                (!kind && (button.dataset.agentOsFollowed === "1" || button.dataset.agentOsSaved === "1"));
             var compactLabel = compactFollowed ? "✓" :
                 kind === "busy" ? "…" :
                 kind === "ok" ? "✓" :
                 kind === "error" ? "!" : "＋";
             button.textContent = compactLabel;
             button.title = compactFollowed
-                ? (button.dataset.agentOsFollowedTitle || "Already followed in Agent OS")
+                ? (button.dataset.agentOsFollowedTitle ||
+                    (button.dataset.agentOsSaved === "1" ? "Already saved to Agent OS" : "Already followed in Agent OS"))
                 : kind === "busy" ? "Saving to Agent OS…" :
                     kind === "ok" ? "Saved to Agent OS" :
                     kind === "error" ? "Agent OS save queued for retry" :
@@ -3287,6 +3321,13 @@
         if (followed) {
             button.textContent = button.dataset.agentOsFollowedLabel || "✓ Following";
             button.title = button.dataset.agentOsFollowedTitle || "Already followed in Agent OS";
+            button.style.background = "#2f855a";
+            return;
+        }
+
+        if (!kind && button.dataset.agentOsSaved === "1") {
+            button.textContent = "✓ In Agent OS";
+            button.title = "Already saved to Agent OS";
             button.style.background = "#2f855a";
             return;
         }
@@ -3311,8 +3352,15 @@
             queueSheetMirror(capture, "capture");
         }
 
+        function saved() {
+            if (String(capture.intent || "") === "follow") return;
+            rememberSaved(capture);
+            if (button) button.dataset.agentOsSaved = "1";
+        }
+
         if (!endpoint) {
             var count = queueCapture(capture, "endpoint-not-configured");
+            saved();
             setButtonState(button, "✓ Queued (" + count + ")", "ok");
             window.setTimeout(function () { setButtonState(button, "+ Agent OS", ""); }, 1600);
             return;
@@ -3349,20 +3397,24 @@
                         }
                     }
 
+                    saved();
                     setButtonState(button, duplicate ? "✓ Already Saved" : "✓ Saved", "ok");
                 } else {
                     var count = queueCapture(capture, "http-" + response.status);
+                    saved();
                     setButtonState(button, "Queued after error (" + count + ")", "error");
                 }
                 window.setTimeout(function () { setButtonState(button, "+ Agent OS", ""); }, 1800);
             },
             onerror: function () {
                 var count = queueCapture(capture, "network-error");
+                saved();
                 setButtonState(button, "Queued offline (" + count + ")", "error");
                 window.setTimeout(function () { setButtonState(button, "+ Agent OS", ""); }, 1800);
             },
             ontimeout: function () {
                 var count = queueCapture(capture, "timeout");
+                saved();
                 setButtonState(button, "Queued timeout (" + count + ")", "error");
                 window.setTimeout(function () { setButtonState(button, "+ Agent OS", ""); }, 1800);
             }
@@ -3372,6 +3424,142 @@
     function saveCurrent(button) {
         var capture = buildCapture();
         sendCapture(capture, button);
+    }
+
+    // -- "already in Agent OS" state for save buttons ------------------------
+
+    function savedKeyNormalize(value) {
+        var text = String(value || "").trim();
+        if (!/^https?:\/\//i.test(text)) return text;
+        try {
+            var u = new URL(text);
+            return u.origin.toLowerCase().replace("://www.", "://") + u.pathname.replace(/\/+$/, "") + u.search;
+        } catch (error) {
+            return text;
+        }
+    }
+
+    function savedKeys(values) {
+        var out = [];
+        values.forEach(function (value) {
+            var key = savedKeyNormalize(value);
+            if (key && out.indexOf(key) === -1) out.push(key);
+        });
+        return out;
+    }
+
+    function urlSavedKeys(url) {
+        var keys = [url];
+        var nexus = nexusInfoFromUrl(url || "");
+        if (nexus) keys.push("nexus:" + nexus.game + ":" + nexus.mod_id);
+        return savedKeys(keys);
+    }
+
+    function captureSavedKeys(capture) {
+        return savedKeys([capture.source_id, capture.canonical_url, capture.url]
+            .concat(urlSavedKeys(capture.url || capture.canonical_url || "")));
+    }
+
+    function savedRegistry() {
+        var saved = GM_getValue(SAVED_KEY, {});
+        return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    }
+
+    function writeSavedRegistry(saved) {
+        var keys = Object.keys(saved);
+        if (keys.length > SAVED_MAX) {
+            keys.sort(function (a, b) { return String(saved[a]).localeCompare(String(saved[b])); })
+                .slice(0, keys.length - SAVED_MAX)
+                .forEach(function (key) { delete saved[key]; });
+        }
+        GM_setValue(SAVED_KEY, saved);
+    }
+
+    function rememberSaved(capture) {
+        var saved = savedRegistry();
+        var now = new Date().toISOString();
+        captureSavedKeys(capture).forEach(function (key) { saved[key] = now; });
+        writeSavedRegistry(saved);
+    }
+
+    function markSavedButton(button) {
+        if (!button || button.dataset.agentOsSaved === "1") return;
+        button.dataset.agentOsSaved = "1";
+        if (!button.dataset.agentOsState) setButtonState(button, "", "");
+    }
+
+    var savedStatusPending = new Set();
+    var savedStatusChecked = new Map();
+    var savedStatusTimer = null;
+
+    // Show "✓ In Agent OS" on a save button whose item was saved before:
+    // first from this browser's record, then by asking the local bridge.
+    function trackSavedState(button, url) {
+        if (!button || !url) return;
+        button.dataset.agentOsSavedUrl = url;
+        var keys = urlSavedKeys(url);
+        var saved = savedRegistry();
+        if (keys.some(function (key) { return saved[key]; })) {
+            markSavedButton(button);
+            return;
+        }
+        savedStatusPending.add(button);
+        if (!savedStatusTimer) savedStatusTimer = window.setTimeout(flushSavedStatus, 400);
+    }
+
+    function bridgeCaptureStatusEndpoint(settings) {
+        var endpoint = String(settings.bridgeCaptureEndpoint || settings.bridgeEndpoint || "");
+        if (!endpoint) return "";
+        return endpoint
+            .replace(/\/batch(?:\?.*)?$/, "/capture/status")
+            .replace(/\/capture(?:\?.*)?$/, "/capture/status");
+    }
+
+    function flushSavedStatus() {
+        savedStatusTimer = null;
+        var buttons = Array.from(savedStatusPending).filter(function (button) {
+            return button.isConnected && button.dataset.agentOsSaved !== "1";
+        });
+        savedStatusPending.clear();
+        var settings = loadSettings();
+        if (!buttons.length || !settings.bridgeEnabled || !settings.bridgeToken) return;
+        var endpoint = bridgeCaptureStatusEndpoint(settings);
+        if (!endpoint) return;
+        var now = Date.now();
+        var keys = [];
+        buttons.forEach(function (button) {
+            urlSavedKeys(button.dataset.agentOsSavedUrl).forEach(function (key) {
+                var checked = savedStatusChecked.get(key);
+                if ((!checked || now - checked > 120000) && keys.indexOf(key) === -1) keys.push(key);
+            });
+        });
+        keys = keys.slice(0, 500);
+        if (!keys.length) return;
+        keys.forEach(function (key) { savedStatusChecked.set(key, now); });
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: endpoint,
+            headers: { "Content-Type": "application/json", "X-Agent-OS-Token": settings.bridgeToken },
+            data: JSON.stringify({ keys: keys }),
+            timeout: 5000,
+            onload: function (response) {
+                if (!(response.status >= 200 && response.status < 300)) return;
+                var body;
+                try { body = JSON.parse(response.responseText || "{}"); } catch (error) { return; }
+                var found = new Set((Array.isArray(body.saved) ? body.saved : []).map(String));
+                if (!found.size) return;
+                var saved = savedRegistry();
+                var stamp = new Date().toISOString();
+                found.forEach(function (key) { if (!saved[key]) saved[key] = stamp; });
+                writeSavedRegistry(saved);
+                buttons.forEach(function (button) {
+                    if (urlSavedKeys(button.dataset.agentOsSavedUrl).some(function (key) { return found.has(key); })) {
+                        markSavedButton(button);
+                    }
+                });
+            }
+            // Older bridges have no status endpoint; buttons stay "+ Agent OS".
+        });
     }
 
     function buttonCss(button) {
@@ -3573,7 +3761,14 @@
             return;
         }
 
-        if (existing) return;
+        if (existing) {
+            if (existing.dataset.agentOsSavedUrl !== location.href && !existing.dataset.agentOsState) {
+                delete existing.dataset.agentOsSaved;
+                setButtonState(existing, "+ Agent OS", "");
+                trackSavedState(existing, location.href);
+            }
+            return;
+        }
         if (!document.body) return;
 
         var button = document.createElement("button");
@@ -3596,6 +3791,7 @@
             saveCurrent(button);
         });
         document.body.appendChild(button);
+        trackSavedState(button, location.href);
     }
 
     function xenforoThreadInfoFromUrl(urlText) {
@@ -3728,6 +3924,7 @@
                 captureXenforoThreadRow(row, link, button);
             });
             host.appendChild(button);
+            trackSavedState(button, info.url);
         });
 
         // Individual thread page: put the same entity-scoped control next to
@@ -3881,6 +4078,7 @@
                 captureRedditCard(card, link, button);
             });
             host.appendChild(button);
+            trackSavedState(button, link.href);
         });
     }
 
@@ -4606,7 +4804,7 @@
         var info = nexusInfoFromUrl(link.href);
         if (!info) return;
         var titleNode = card.querySelector("h2, h3, h4, [class*='title']");
-        var authorNode = card.querySelector('a[href*="/users/"]');
+        var authorNode = card.querySelector('a[href*="/users/"], a[href*="/profile/"]');
         var capture = genericCapture();
         capture.site = "nexusmods";
         capture.content_type = "nexus_mod";
@@ -4644,6 +4842,7 @@
                 captureNexusCard(card, link, button);
             });
             card.appendChild(button);
+            trackSavedState(button, info.url);
         });
     }
 
