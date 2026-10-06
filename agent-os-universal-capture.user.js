@@ -3473,9 +3473,14 @@
             .concat(urlSavedKeys(capture.url || capture.canonical_url || "")));
     }
 
+    var savedRegistryCache = null;
+
     function savedRegistry() {
+        if (savedRegistryCache) return savedRegistryCache;
         var saved = GM_getValue(SAVED_KEY, {});
-        return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+        savedRegistryCache = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+        window.setTimeout(function () { savedRegistryCache = null; }, 1000);
+        return savedRegistryCache;
     }
 
     function writeSavedRegistry(saved) {
@@ -3486,6 +3491,7 @@
                 .forEach(function (key) { delete saved[key]; });
         }
         GM_setValue(SAVED_KEY, saved);
+        savedRegistryCache = null;
     }
 
     function rememberSaved(capture) {
@@ -4836,11 +4842,16 @@
 
     function addNexusCardButtons() {
         if (hostname().indexOf("nexusmods.com") === -1) return;
+        // On a mod's own page its tab links (Description, Files, Images, ...)
+        // point at that mod; they are navigation, not mod cards.
+        var current = nexusInfoFromUrl(location.href);
         document.querySelectorAll('a[href*="/mods/"]').forEach(function (link) {
             var info = nexusInfoFromUrl(link.href);
             if (!info) return;
+            if (current && current.game === info.game && current.mod_id === info.mod_id) return;
+            if (link.closest("nav, header, footer, [role='tablist'], [role='navigation']")) return;
             var card = link.closest("article, li, [class*='card'], [class*='tile'], [class*='mod-tile']");
-            if (!card || card.dataset.agentOsCaptureReady === "1") return;
+            if (!card || card.dataset.agentOsCaptureReady === "1" || !card.querySelector("img")) return;
             card.dataset.agentOsCaptureReady = "1";
 
             var button = document.createElement("button");
