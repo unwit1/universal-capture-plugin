@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Agent OS Universal Capture
 // @namespace    agent-os
-// @version      3.13.25
+// @version      3.13.26
 // @description  Save useful pages and passively index rendered Discord Web channel and search-result messages into Agent OS.
 // @homepageURL   https://github.com/unwit1/universal-capture-plugin
 // @updateURL     https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js
@@ -37,7 +37,7 @@
         return;
     }
 
-    var VERSION = "3.13.25";
+    var VERSION = "3.13.26";
     var AGENT_OS_USERSCRIPT_URL =
         "https://raw.githubusercontent.com/unwit1/universal-capture-plugin/main/agent-os-universal-capture.user.js";
     var SETTINGS_KEY = "agent_os_capture_settings_v1";
@@ -56,6 +56,8 @@
         device: "",
         defaultIntent: "save",
         showFloatingButton: true,
+        // The small "Journal ●" indicator; the journal itself runs either way.
+        showJournalStatus: false,
         discordPassiveIndexing: true,
         browserJournalEnabled: true,
         browserJournalExcludedDomains: [],
@@ -715,6 +717,10 @@
     function ensureJournalStatus() {
         if (!document.body) return null;
         var pill = document.getElementById("agent-os-browser-journal-status");
+        if (!loadSettings().showJournalStatus) {
+            if (pill) pill.remove();
+            return null;
+        }
         if (pill) return pill;
 
         pill = document.createElement("button");
@@ -3504,6 +3510,7 @@
     function markSavedButton(button) {
         if (!button || button.dataset.agentOsSaved === "1") return;
         button.dataset.agentOsSaved = "1";
+        button.setAttribute("data-agent-os-saved", "1");
         if (!button.dataset.agentOsState) setButtonState(button, "", "");
     }
 
@@ -4078,25 +4085,21 @@
 
             if (card.querySelector && card.querySelector(".agent-os-reddit-post-save")) return;
 
-            var host = card.querySelector && (
-                card.querySelector("[slot='action-row']") ||
-                card.querySelector("[data-post-click-location='post-media-content']") ||
-                card.querySelector(".flat-list.buttons")
+            // A small "+" right after the post title, shown while the title is hovered.
+            var title = card.querySelector && card.querySelector(
+                "a.title, [slot='title'], a[id^='post-title'], h1, h3"
             );
-            host = host || card;
-
-            var button = inlineEntityButton("+ Agent OS");
+            if (!title) return;
+            var button = hoverIcon("Save this post to Agent OS");
             button.classList.add("agent-os-reddit-post-save");
-            button.title = "Save this Reddit post to Agent OS";
-            button.style.float = "right";
-            button.style.marginTop = "6px";
-            button.style.marginBottom = "6px";
+            if (title.getAttribute("slot")) button.setAttribute("slot", title.getAttribute("slot"));
             button.addEventListener("click", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
                 captureRedditCard(card, link, button);
             });
-            host.appendChild(button);
+            if (title.parentElement) title.parentElement.classList.add("agent-os-title-host");
+            title.insertAdjacentElement("afterend", button);
             trackSavedState(button, link.href);
         });
     }
@@ -4842,13 +4845,13 @@
 
     function addNexusCardButtons() {
         if (hostname().indexOf("nexusmods.com") === -1) return;
-        // On a mod's own page its tab links (Description, Files, Images, ...)
-        // point at that mod; they are navigation, not mod cards.
-        var current = nexusInfoFromUrl(location.href);
+        // Mod cards only on lists (mod overview, search, profiles). A mod's
+        // own page is saved with its page button; links in its tabs,
+        // description and requirements get no buttons.
+        if (nexusInfoFromUrl(location.href)) return;
         document.querySelectorAll('a[href*="/mods/"]').forEach(function (link) {
             var info = nexusInfoFromUrl(link.href);
             if (!info) return;
-            if (current && current.game === info.game && current.mod_id === info.mod_id) return;
             if (link.closest("nav, header, footer, [role='tablist'], [role='navigation']")) return;
             var card = link.closest("article, li, [class*='card'], [class*='tile'], [class*='mod-tile']");
             if (!card || card.dataset.agentOsCaptureReady === "1" || !card.querySelector("img")) return;
@@ -5796,13 +5799,58 @@
         }, "+ Follow project");
     }
 
+    function ensureHoverIconStyles() {
+        if (document.getElementById("agent-os-hover-icon-styles")) return;
+        var style = document.createElement("style");
+        style.id = "agent-os-hover-icon-styles";
+        style.textContent =
+            ".agent-os-hover-icon{all:initial;display:inline-block!important;width:16px!important;height:16px!important;" +
+            "margin:0 0 0 3px!important;border-radius:50%!important;background:#20242b!important;color:#fff!important;" +
+            "font:700 11px/16px system-ui,-apple-system,Segoe UI,sans-serif!important;text-align:center!important;" +
+            "vertical-align:middle!important;cursor:pointer!important;opacity:0!important;transition:opacity .1s ease!important;}" +
+            "a:hover+.agent-os-hover-icon,.agent-os-hover-icon:hover,.agent-os-hover-icon:focus-visible," +
+            ".agent-os-title-host:hover>.agent-os-hover-icon,.agent-os-hover-icon[data-agent-os-state='busy']," +
+            ".agent-os-hover-icon[data-agent-os-state='ok'],.agent-os-hover-icon[data-agent-os-state='error']{opacity:.9!important;}" +
+            ".agent-os-hover-icon[data-agent-os-followed='1'],.agent-os-hover-icon[data-agent-os-saved='1']{background:#2f855a!important;}";
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // A 16px "+" placed right after `link`, shown while the link is hovered.
+    function hoverIcon(title) {
+        ensureHoverIconStyles();
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "＋";
+        button.className = "agent-os-hover-icon";
+        button.dataset.agentOsCompact = "1";
+        button.dataset.agentOsDefaultTitle = title;
+        button.title = title;
+        return button;
+    }
+
+    function addHoverFollowIcon(link, key, targetFactory, title) {
+        var next = link.nextElementSibling;
+        if (next && next.dataset && next.dataset.agentOsFollowKey === key) return;
+        var button = hoverIcon(title);
+        button.classList.add("agent-os-follow-target");
+        button.dataset.agentOsFollowKey = key;
+        wireCreatorFollowStatus(button, targetFactory, true);
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var target = targetFactory();
+            if (target) sendFollow(target, button);
+        });
+        link.insertAdjacentElement("afterend", button);
+    }
+
     function addRedditUserFollowButtons() {
         if (hostname().indexOf("reddit.com") === -1) return;
         document.querySelectorAll('a[href*="/user/"], a[href*="/u/"]').forEach(function (link) {
+            if (link.closest("#header, header, nav, .side, .agent-os-hover-icon")) return;
             var user = profileIdFromHref(link.href, /\/(?:user|u)\/([^/?#]+)/i);
-            if (!user) return;
-            var host = link.parentElement || link;
-            addFollowButtonOnce(host, "reddit-user:" + user.toLowerCase(), function () {
+            if (!user || !cleanText(link.textContent)) return;
+            addHoverFollowIcon(link, "reddit-user:" + user.toLowerCase(), function () {
                 return {
                     site: "reddit",
                     target_type: "creator",
@@ -5812,7 +5860,22 @@
                     url: "https://www.reddit.com/user/" + user + "/",
                     metadata: { provider: "reddit", username: user }
                 };
-            }, "+ Follow user");
+            }, "Follow u/" + user + " in Agent OS");
+        });
+        document.querySelectorAll('a.subreddit[href*="/r/"], shreddit-post a[href^="/r/"], a[data-testid="subreddit-name"]').forEach(function (link) {
+            var match = String(link.getAttribute("href") || "").match(/\/r\/([^/?#]+)\/?$/i);
+            if (!match || /^(all|popular)$/i.test(match[1]) || !cleanText(link.textContent)) return;
+            var sub = match[1];
+            addHoverFollowIcon(link, "reddit-subreddit:" + sub.toLowerCase(), function () {
+                return {
+                    site: "reddit",
+                    target_type: "community",
+                    source_id: "reddit:subreddit:" + sub.toLowerCase(),
+                    title: "r/" + sub,
+                    url: "https://www.reddit.com/r/" + sub + "/",
+                    metadata: { provider: "reddit", subreddit: sub }
+                };
+            }, "Follow r/" + sub + " in Agent OS");
         });
     }
 
