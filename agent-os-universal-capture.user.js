@@ -70,7 +70,10 @@
         sheetMirrorEnabled: true,
         sheetEndpoint: "",
         sheetToken: "",
-        sheetFlushSeconds: 15
+        sheetFlushSeconds: 15,
+        // Browser Journal / Discord events stay local (bridge + intake);
+        // the sheet only records saved links unless this is turned on.
+        sheetMirrorEvents: false
     };
 
     function loadSettings() {
@@ -2357,7 +2360,7 @@
 
             // Mirror every durably accepted Browser Journal / Discord event to
             // the Google Sheet outbox before compacting the browser-side copy.
-            if (sheetMirrorConfigured()) {
+            if (sheetMirrorConfigured() && loadSettings().sheetMirrorEvents === true) {
                 batch.events.forEach(function (event) {
                     if (!event || !acknowledged.has(String(event.event_id || ""))) return;
                     queueSheetMirror(
@@ -3196,6 +3199,16 @@
         }
 
         var queue = GM_getValue(SHEET_QUEUE_KEY, []);
+        if (Array.isArray(queue) && loadSettings().sheetMirrorEvents !== true) {
+            // Drop activity events queued by older versions; only saves go to the sheet.
+            var savesOnly = queue.filter(function (entry) {
+                return !(entry && /^sheet-event:/.test(String(entry.id || "")));
+            });
+            if (savesOnly.length !== queue.length) {
+                GM_setValue(SHEET_QUEUE_KEY, savesOnly);
+                queue = savesOnly;
+            }
+        }
         if (!Array.isArray(queue) || !queue.length) {
             if (showResult) window.alert("Google Sheet mirror is connected. Nothing is waiting to sync.");
             return { submitted: 0, remaining: 0 };
